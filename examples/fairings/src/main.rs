@@ -30,7 +30,7 @@ impl Fairing for Counter {
 
     async fn on_ignite(&self, rocket: Rocket<Build>) -> fairing::Result {
         #[get("/counts")]
-        fn counts(counts: State<'_, Counter>) -> String {
+        fn counts(counts: &State<Counter>) -> String {
             let get_count = counts.get.load(Ordering::Relaxed);
             let post_count = counts.post.load(Ordering::Relaxed);
             format!("Get: {}\nPost: {}", get_count, post_count)
@@ -39,7 +39,7 @@ impl Fairing for Counter {
         Ok(rocket.manage(self.clone()).mount("/", routes![counts]))
     }
 
-    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data) {
+    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
         if request.method() == Method::Get {
             self.get.fetch_add(1, Ordering::Relaxed);
         } else if request.method() == Method::Post {
@@ -54,7 +54,7 @@ fn hello() -> &'static str {
 }
 
 #[get("/token")]
-fn token(token: State<'_, Token>) -> String {
+fn token(token: &State<Token>) -> String {
     format!("{}", token.0)
 }
 

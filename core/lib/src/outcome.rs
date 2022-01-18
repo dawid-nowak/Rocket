@@ -26,7 +26,7 @@
 //!
 //! ```rust
 //! # use rocket::post;
-//! # type S = rocket::data::Data;
+//! # type S = String;
 //! #[post("/", data = "<my_val>")]
 //! fn hello(my_val: S) { /* ... */  }
 //! ```
@@ -49,7 +49,7 @@
 //!
 //! ```rust
 //! # use rocket::post;
-//! # type S = rocket::data::Data;
+//! # type S = Option<String>;
 //! # type E = std::convert::Infallible;
 //! #[post("/", data = "<my_val>")]
 //! fn hello(my_val: Result<S, E>) { /* ... */ }
@@ -73,7 +73,7 @@
 //!
 //! ```rust
 //! # use rocket::post;
-//! # type S = rocket::data::Data;
+//! # type S = String;
 //! #[post("/", data = "<my_val>")]
 //! fn hello(my_val: S) { /* ... */ }
 //! ```
@@ -165,10 +165,11 @@ impl<S, E, F> Outcome<S, E, F> {
     /// assert_eq!(x.unwrap(), 10);
     /// ```
     #[inline]
+    #[track_caller]
     pub fn unwrap(self) -> S {
         match self {
             Success(val) => val,
-            _ => panic!("Expected a successful outcome!")
+            _ => panic!("unwrapped a non-successful outcome")
         }
     }
 
@@ -188,10 +189,11 @@ impl<S, E, F> Outcome<S, E, F> {
     /// assert_eq!(x.expect("success value"), 10);
     /// ```
     #[inline]
+    #[track_caller]
     pub fn expect(self, message: &str) -> S {
         match self {
             Success(val) => val,
-            _ => panic!("Outcome::expect() failed: {}", message)
+            _ => panic!("unwrapped a non-successful outcome: {}", message)
         }
     }
 
@@ -417,6 +419,28 @@ impl<S, E, F> Outcome<S, E, F> {
         }
     }
 
+    /// Converts from `Outcome<S, E, F>` to `Outcome<&mut S, &mut E, &mut F>`.
+    ///
+    /// ```rust
+    /// # use rocket::outcome::Outcome;
+    /// # use rocket::outcome::Outcome::*;
+    /// #
+    /// let mut x: Outcome<i32, &str, usize> = Success(10);
+    /// if let Success(val) = x.as_mut() {
+    ///     *val = 20;
+    /// }
+    ///
+    /// assert_eq!(x.unwrap(), 20);
+    /// ```
+    #[inline]
+    pub fn as_mut(&mut self) -> Outcome<&mut S, &mut E, &mut F> {
+        match *self {
+            Success(ref mut val) => Success(val),
+            Failure(ref mut val) => Failure(val),
+            Forward(ref mut val) => Forward(val),
+        }
+    }
+
     /// Maps the `Success` value using `f`. Maps an `Outcome<S, E, F>` to an
     /// `Outcome<T, E, F>` by applying the function `f` to the value of type `S`
     /// in `self` if `self` is an `Outcome::Success`.
@@ -483,10 +507,10 @@ impl<S, E, F> Outcome<S, E, F> {
         }
     }
 
-    /// Maps the `Success` value using `f()`, returning the `Outcome` from `f()`
-    /// or the original `self` if `self` is not `Success`. Maps an `Outcome<S,
-    /// E, F>` to an `Outcome<T, E, F>` by applying the function `f` to the
-    /// value of type `S` in `self` if `self` is an `Outcome::Success`.
+    /// Converts from `Outcome<S, E, F>` to `Outcome<T, E, F>` using `f` to map
+    /// `Success(S)` to `Success(T)`.
+    ///
+    /// If `self` is not `Success`, `self` is returned.
     ///
     /// # Examples
     ///
@@ -513,11 +537,10 @@ impl<S, E, F> Outcome<S, E, F> {
         }
     }
 
-    /// Maps the `Failure` value using `f()`, returning the `Outcome` from `f()`
-    /// or the original `self` if `self` is not `Failure`. Maps an `Outcome<S,
-    /// Maps an `Outcome<S, E, F>` to an `Outcome<S, T, F>` by applying the
-    /// function `f` to the value of type `E` in `self` if `self` is an
-    /// `Outcome::Failure`.
+    /// Converts from `Outcome<S, E, F>` to `Outcome<S, T, F>` using `f` to map
+    /// `Failure(E)` to `Failure(T)`.
+    ///
+    /// If `self` is not `Failure`, `self` is returned.
     ///
     /// # Examples
     ///
@@ -544,10 +567,10 @@ impl<S, E, F> Outcome<S, E, F> {
         }
     }
 
-    /// Maps the `Forward` value using `f()`, returning the `Outcome` from `f()`
-    /// or the original `self` if `self` is not `Forward`. Maps an `Outcome<S,
-    /// E, F>` to an `Outcome<S, E, T>` by applying the function `f` to the
-    /// value of type `F` in `self` if `self` is an `Outcome::Forward`.
+    /// Converts from `Outcome<S, E, F>` to `Outcome<S, E, T>` using `f` to map
+    /// `Forward(F)` to `Forward(T)`.
+    ///
+    /// If `self` is not `Forward`, `self` is returned.
     ///
     /// # Examples
     ///
@@ -574,25 +597,59 @@ impl<S, E, F> Outcome<S, E, F> {
         }
     }
 
-    /// Converts from `Outcome<S, E, F>` to `Outcome<&mut S, &mut E, &mut F>`.
+    /// Converts `Outcome<S, E, F>` to `Result<S, E>` by identity mapping
+    /// `Success(S)` and `Failure(E)` to `Result<T, E>` and mapping `Forward(F)`
+    /// to `Result<T, E>` using `f`.
     ///
     /// ```rust
     /// # use rocket::outcome::Outcome;
     /// # use rocket::outcome::Outcome::*;
     /// #
-    /// let mut x: Outcome<i32, &str, usize> = Success(10);
-    /// if let Success(val) = x.as_mut() {
-    ///     *val = 20;
-    /// }
+    /// let x: Outcome<i32, &str, usize> = Success(10);
+    /// assert_eq!(x.ok_map_forward(|x| Ok(x as i32 + 1)), Ok(10));
     ///
-    /// assert_eq!(x.unwrap(), 20);
+    /// let x: Outcome<i32, &str, usize> = Failure("hello");
+    /// assert_eq!(x.ok_map_forward(|x| Ok(x as i32 + 1)), Err("hello"));
+    ///
+    /// let x: Outcome<i32, &str, usize> = Forward(0);
+    /// assert_eq!(x.ok_map_forward(|x| Ok(x as i32 + 1)), Ok(1));
     /// ```
     #[inline]
-    pub fn as_mut(&mut self) -> Outcome<&mut S, &mut E, &mut F> {
-        match *self {
-            Success(ref mut val) => Success(val),
-            Failure(ref mut val) => Failure(val),
-            Forward(ref mut val) => Forward(val),
+    pub fn ok_map_forward<M>(self, f: M) -> Result<S, E>
+        where M: FnOnce(F) -> Result<S, E>
+    {
+        match self {
+            Outcome::Success(s) => Ok(s),
+            Outcome::Failure(e) => Err(e),
+            Outcome::Forward(v) => f(v),
+        }
+    }
+
+    /// Converts `Outcome<S, E, F>` to `Result<S, E>` by identity mapping
+    /// `Success(S)` and `Forward(F)` to `Result<T, F>` and mapping `Failure(E)`
+    /// to `Result<T, F>` using `f`.
+    ///
+    /// ```rust
+    /// # use rocket::outcome::Outcome;
+    /// # use rocket::outcome::Outcome::*;
+    /// #
+    /// let x: Outcome<i32, &str, usize> = Success(10);
+    /// assert_eq!(x.ok_map_failure(|s| Ok(123)), Ok(10));
+    ///
+    /// let x: Outcome<i32, &str, usize> = Failure("hello");
+    /// assert_eq!(x.ok_map_failure(|s| Ok(123)), Ok(123));
+    ///
+    /// let x: Outcome<i32, &str, usize> = Forward(0);
+    /// assert_eq!(x.ok_map_failure(|s| Ok(123)), Err(0));
+    /// ```
+    #[inline]
+    pub fn ok_map_failure<M>(self, f: M) -> Result<S, F>
+        where M: FnOnce(E) -> Result<S, F>
+    {
+        match self {
+            Outcome::Success(s) => Ok(s),
+            Outcome::Failure(e) => f(e),
+            Outcome::Forward(v) => Err(v),
         }
     }
 
@@ -605,85 +662,99 @@ impl<S, E, F> Outcome<S, E, F> {
         }
     }
 }
+
 impl<'a, S: Send + 'a, E: Send + 'a, F: Send + 'a> Outcome<S, E, F> {
+    /// Pins a future that resolves to `self`, returning a
+    /// [`BoxFuture`](crate::futures::future::BoxFuture) that resolves to
+    /// `self`.
     #[inline]
     pub fn pin(self) -> futures::future::BoxFuture<'a, Self> {
         Box::pin(async move { self })
     }
 }
 
-/// Unwraps a [`Success`](Outcome::Success) or propagates a `Forward` or
-/// `Failure`.
-///
-/// This is just like `?` (or previously, `try!`), but for `Outcome`. In the
-/// case of a `Forward` or `Failure` variant, the inner type is passed to
-/// [`From`](std::convert::From), allowing for the conversion between specific
-/// and more general types. The resulting forward/error is immediately returned.
-///
-/// Because of the early return, `try_outcome!` can only be used in methods that
-/// return [`Outcome`].
-///
-/// [`Outcome`]: crate::outcome::Outcome
-///
-/// ## Example
-///
-/// ```rust,no_run
-/// # #[macro_use] extern crate rocket;
-/// use std::sync::atomic::{AtomicUsize, Ordering};
-///
-/// use rocket::State;
-/// use rocket::request::{self, Request, FromRequest};
-/// use rocket::outcome::Outcome::*;
-///
-/// #[derive(Default)]
-/// struct Atomics {
-///     uncached: AtomicUsize,
-///     cached: AtomicUsize,
-/// }
-///
-/// struct Guard1;
-/// struct Guard2;
-///
-/// #[rocket::async_trait]
-/// impl<'r> FromRequest<'r> for Guard1 {
-///     type Error = ();
-///
-///     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, ()> {
-///         // Attempt to fetch the guard, passing through any error or forward.
-///         let atomics = try_outcome!(req.guard::<State<'_, Atomics>>().await);
-///         atomics.uncached.fetch_add(1, Ordering::Relaxed);
-///         req.local_cache(|| atomics.cached.fetch_add(1, Ordering::Relaxed));
-///
-///         Success(Guard1)
-///     }
-/// }
-///
-/// #[rocket::async_trait]
-/// impl<'r> FromRequest<'r> for Guard2 {
-///     type Error = ();
-///
-///     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, ()> {
-///         // Attempt to fetch the guard, passing through any error or forward.
-///         let guard1: Guard1 = try_outcome!(req.guard::<Guard1>().await);
-///         Success(Guard2)
-///     }
-/// }
-/// ```
-#[macro_export]
-macro_rules! try_outcome {
-    ($expr:expr $(,)?) => (match $expr {
-        $crate::outcome::Outcome::Success(val) => val,
-        $crate::outcome::Outcome::Failure(e) => {
-            return $crate::outcome::Outcome::Failure(::std::convert::From::from(e))
-        },
-        $crate::outcome::Outcome::Forward(f) => {
-            return $crate::outcome::Outcome::Forward(::std::convert::From::from(f))
-        },
-    });
+crate::export! {
+    /// Unwraps a [`Success`](Outcome::Success) or propagates a `Forward` or
+    /// `Failure`.
+    ///
+    /// # Syntax
+    ///
+    /// The macro has the following "signature":
+    ///
+    /// ```rust
+    /// use rocket::outcome::Outcome;
+    ///
+    /// // Returns the inner `S` if `outcome` is `Outcome::Success`. Otherwise
+    /// // returns from the caller with `Outcome<impl From<E>, impl From<F>>`.
+    /// fn try_outcome<S, E, F>(outcome: Outcome<S, E, F>) -> S
+    /// # { unimplemented!() }
+    /// ```
+    ///
+    /// This is just like `?` (or previously, `try!`), but for `Outcome`. In the
+    /// case of a `Forward` or `Failure` variant, the inner type is passed to
+    /// [`From`](std::convert::From), allowing for the conversion between
+    /// specific and more general types. The resulting forward/error is
+    /// immediately returned. Because of the early return, `try_outcome!` can
+    /// only be used in methods that return [`Outcome`].
+    ///
+    /// [`Outcome`]: crate::outcome::Outcome
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// # #[macro_use] extern crate rocket;
+    /// use std::sync::atomic::{AtomicUsize, Ordering};
+    ///
+    /// use rocket::State;
+    /// use rocket::request::{self, Request, FromRequest};
+    /// use rocket::outcome::{try_outcome, Outcome::*};
+    ///
+    /// #[derive(Default)]
+    /// struct Atomics {
+    ///     uncached: AtomicUsize,
+    ///     cached: AtomicUsize,
+    /// }
+    ///
+    /// struct Guard1;
+    /// struct Guard2;
+    ///
+    /// #[rocket::async_trait]
+    /// impl<'r> FromRequest<'r> for Guard1 {
+    ///     type Error = ();
+    ///
+    ///     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, ()> {
+    ///         // Attempt to fetch the guard, passing through any error or forward.
+    ///         let atomics = try_outcome!(req.guard::<&State<Atomics>>().await);
+    ///         atomics.uncached.fetch_add(1, Ordering::Relaxed);
+    ///         req.local_cache(|| atomics.cached.fetch_add(1, Ordering::Relaxed));
+    ///
+    ///         Success(Guard1)
+    ///     }
+    /// }
+    ///
+    /// #[rocket::async_trait]
+    /// impl<'r> FromRequest<'r> for Guard2 {
+    ///     type Error = ();
+    ///
+    ///     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, ()> {
+    ///         // Attempt to fetch the guard, passing through any error or forward.
+    ///         let guard1: Guard1 = try_outcome!(req.guard::<Guard1>().await);
+    ///         Success(Guard2)
+    ///     }
+    /// }
+    /// ```
+    macro_rules! try_outcome {
+        ($expr:expr $(,)?) => (match $expr {
+            $crate::outcome::Outcome::Success(val) => val,
+            $crate::outcome::Outcome::Failure(e) => {
+                return $crate::outcome::Outcome::Failure(::std::convert::From::from(e))
+            },
+            $crate::outcome::Outcome::Forward(f) => {
+                return $crate::outcome::Outcome::Forward(::std::convert::From::from(f))
+            },
+        });
+    }
 }
-
-#[doc(inline)]
-pub use try_outcome;
 
 impl<S, E, F> fmt::Debug for Outcome<S, E, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

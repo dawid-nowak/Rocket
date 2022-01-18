@@ -1,17 +1,27 @@
 mod parse;
 
-use proc_macro2::{TokenStream, Span};
+use std::hash::Hash;
+
 use devise::{Spanned, SpanWrapped, Result, FromMeta, Diagnostic};
+use devise::ext::TypeExt as _;
+use proc_macro2::{TokenStream, Span};
 
-use crate::{proc_macro2, syn};
 use crate::proc_macro_ext::StringLit;
-use crate::syn_ext::IdentExt;
+use crate::syn_ext::{IdentExt, TypeExt as _};
 use crate::http_codegen::{Method, Optional};
-
 use crate::attribute::param::Guard;
-use parse::{Route, Attribute, MethodAttribute};
+
+use self::parse::{Route, Attribute, MethodAttribute};
+
+
 
 impl Route {
+    pub fn guards(&self) -> impl Iterator<Item = &Guard> {
+        self.param_guards()
+            .chain(self.query_guards())
+            .chain(self.request_guards.iter())
+    }
+
     pub fn param_guards(&self) -> impl Iterator<Item = &Guard> {
         self.path_params.iter().filter_map(|p| p.guard())
     }
@@ -67,29 +77,30 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 
     #[allow(non_snake_case)]
     Some(quote! {
-        let mut _e = #_form::Errors::new();
-        #(let mut #ident = #init_expr;)*
+        let (#(#ident),*) = {
+            let mut __e = #_form::Errors::new();
+            #(let mut #ident = #init_expr;)*
 
-        for _f in #__req.query_fields() {
-            let _raw = (_f.name.source().as_str(), _f.value);
-            let _key = _f.name.key_lossy().as_str();
-            match (_raw, _key) {
-                // Skip static parameters so <param..> doesn't see them.
-                #(((#raw_name, #raw_value), _) => { /* skip */ },)*
-                #((_, #matcher) => #push_expr,)*
-                _ => { /* in case we have no trailing, ignore all else */ },
+            for _f in #__req.query_fields() {
+                let _raw = (_f.name.source().as_str(), _f.value);
+                let _key = _f.name.key_lossy().as_str();
+                match (_raw, _key) {
+                    // Skip static parameters so <param..> doesn't see them.
+                    #(((#raw_name, #raw_value), _) => { /* skip */ },)*
+                    #((_, #matcher) => #push_expr,)*
+                    _ => { /* in case we have no trailing, ignore all else */ },
+                }
             }
-        }
 
-        #(
-            let #ident = match #finalize_expr {
-                #_Ok(_v) => #_Some(_v),
-                #_Err(_err) => {
-                    _e.extend(_err.with_name(#_form::NameView::new(#name)));
-                    #_None
-                },
-            };
-        )*
+            #(
+                let #ident = match #finalize_expr {
+                    #_Ok(_v) => #_Some(_v),
+                    #_Err(_err) => {
+                        __e.extend(_err.with_name(#_form::NameView::new(#name)));
+                        #_None
+                    },
+                };
+            )*
 
         if !_e.is_empty() {
             #_trace::warn_span!("mismatch_query_string",
@@ -100,18 +111,28 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
             return #Outcome::Forward(#__data);
         }
 
-        #(let #ident = #ident.unwrap();)*
+            (#(#ident.unwrap()),*)
+        };
     })
 }
 
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => __req, __data, _request, FromRequest, Outcome);
+    define_spanned_export!(ty.span() =>
+        __req, __data, _request, _log, FromRequest, Outcome
+    );
+
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req).await {
             #Outcome::Success(__v) => __v,
-            #Outcome::Forward(_) => return #Outcome::Forward(#__data),
-            #Outcome::Failure((__c, _)) => return #Outcome::Failure(__c),
+            #Outcome::Forward(_) => {
+                #_log::warn_!("Request guard `{}` is forwarding.", stringify!(#ty));
+                return #Outcome::Forward(#__data);
+            },
+            #Outcome::Failure((__c, __e)) => {
+                #_log::warn_!("Request guard `{}` failed: {:?}.", stringify!(#ty), __e);
+                return #Outcome::Failure(__c);
+            }
         };
     }
 }
@@ -125,7 +146,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 
     // Returned when a dynamic parameter fails to parse.
     let parse_error = quote_spanned! { ty.span() => {
-        #_trace::warn!(parameter = #name, error = ?__error, "Failed to parse dynamic parameter");
+        #_trace::warn!(parameter = #name, error = ?__error, "Parameter guard `{}: {}` is forwarding: {:?}.", #name, stringify!(#ty), __error);
         #Outcome::Forward(#__data)
     } };
 
@@ -141,6 +162,7 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
                 #_None => {
                     #_trace::error!("Internal invariant: dynamic parameter not found.");
                     #_trace::error!("Please report this error to the Rocket issue tracker.");
+                    #_trace::error!("https://github.com/SergioBenitez/Rocket/issues");
                     return #Outcome::Forward(#__data);
                 }
             }
@@ -159,42 +181,38 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => __req, __data, FromData, Outcome);
+    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
             #Outcome::Success(__d) => __d,
-            #Outcome::Forward(__d) => return #Outcome::Forward(__d),
-            #Outcome::Failure((__c, _)) => return #Outcome::Failure(__c),
+            #Outcome::Forward(__d) => {
+                #_log::warn_!("Data guard `{}` is forwarding.", stringify!(#ty));
+                return #Outcome::Forward(__d);
+            }
+            #Outcome::Failure((__c, __e)) => {
+                #_log::warn_!("Data guard `{}` failed: {:?}.", stringify!(#ty), __e);
+                return #Outcome::Failure(__c);
+            }
         };
     }
 }
 
 fn internal_uri_macro_decl(route: &Route) -> TokenStream {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    // Keep a global counter (+ thread ID later) to generate unique ids.
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
     // FIXME: Is this the right order? Does order matter?
     let uri_args = route.param_guards()
         .chain(route.query_guards())
         .map(|guard| (&guard.fn_ident, &guard.ty))
         .map(|(ident, ty)| quote!(#ident: #ty));
 
-    // Generate entropy based on the route's metadata.
-    let mut hasher = DefaultHasher::new();
-    route.handler.sig.ident.hash(&mut hasher);
-    route.attr.uri.path().hash(&mut hasher);
-    route.attr.uri.query().hash(&mut hasher);
-    std::process::id().hash(&mut hasher);
-    std::thread::current().id().hash(&mut hasher);
-    COUNTER.fetch_add(1, Ordering::AcqRel).hash(&mut hasher);
-
+    // Generate a unique macro name based on the route's metadata.
     let macro_name = route.handler.sig.ident.prepend(crate::URI_MACRO_PREFIX);
-    let inner_macro_name = macro_name.append(&hasher.finish().to_string());
+    let inner_macro_name = macro_name.uniqueify_with(|mut hasher| {
+        route.handler.sig.ident.hash(&mut hasher);
+        route.attr.uri.path().hash(&mut hasher);
+        route.attr.uri.query().hash(&mut hasher)
+    });
+
     let route_uri = route.attr.uri.to_string();
 
     quote_spanned! { Span::call_site() =>
@@ -215,7 +233,7 @@ fn internal_uri_macro_decl(route: &Route) -> TokenStream {
 fn responder_outcome_expr(route: &Route) -> TokenStream {
     let ret_span = match route.handler.sig.output {
         syn::ReturnType::Default => route.handler.sig.ident.span(),
-        syn::ReturnType::Type(_, ref ty) => ty.span().into()
+        syn::ReturnType::Type(_, ref ty) => ty.span()
     };
 
     let user_handler_fn_name = &route.handler.sig.ident;
@@ -223,13 +241,75 @@ fn responder_outcome_expr(route: &Route) -> TokenStream {
         .map(|(ident, _)| ident.rocketized());
 
     let _await = route.handler.sig.asyncness
-        .map(|a| quote_spanned!(a.span().into() => .await));
+        .map(|a| quote_spanned!(a.span() => .await));
 
     define_spanned_export!(ret_span => __req, _route);
     quote_spanned! { ret_span =>
         let ___responder = #user_handler_fn_name(#(#parameter_names),*) #_await;
         #_route::Outcome::from(#__req, ___responder)
     }
+}
+
+fn sentinels_expr(route: &Route) -> TokenStream {
+    let ret_ty = match route.handler.sig.output {
+        syn::ReturnType::Default => None,
+        syn::ReturnType::Type(_, ref ty) => Some(ty.with_stripped_lifetimes())
+    };
+
+    let generic_idents: Vec<_> = route.handler.sig.generics
+        .type_params()
+        .map(|p| &p.ident)
+        .collect();
+
+    // Note: for a given route, we need to emit a valid graph of eligble
+    // sentinels. This means that we don't have broken links, where a child
+    // points to a parent that doesn't exist. The concern is that the
+    // `is_concrete()` filter will cause a break in the graph.
+    //
+    // Here's a proof by cases for why this can't happen:
+    //    1. if `is_concrete()` returns `false` for a (valid) type, it returns
+    //       false for all of its parents. we consider this an axiom; this is
+    //       the point of `is_concrete()`. the type is filtered out, so the
+    //       theorem vacously holds
+    //    2. if `is_concrete()` returns `true`, for a type `T`, it either:
+    //      * returns `false` for the parent. by 1) it will return false for
+    //        _all_ parents of the type, so no node in the graph can consider,
+    //        directly or indirectly, `T` to be a child, and thus there are no
+    //        broken links; the thereom holds
+    //      * returns `true` for the parent, and so the type has a parent, and
+    //      the theorem holds.
+    //    3. these are all the cases. QED.
+
+    const TY_MACS: &[&str] = &["ReaderStream", "TextStream", "ByteStream", "EventStream"];
+
+    fn ty_mac_mapper(tokens: &TokenStream) -> Option<syn::Type> {
+        use crate::bang::typed_stream::Input;
+
+        match syn::parse2(tokens.clone()).ok()? {
+            Input::Type(ty, ..) => Some(ty),
+            Input::Tokens(..) => None
+        }
+    }
+
+    let eligible_types = route.guards()
+        .map(|guard| &guard.ty)
+        .chain(ret_ty.as_ref().into_iter())
+        .flat_map(|ty| ty.unfold_with_ty_macros(TY_MACS, ty_mac_mapper))
+        .filter(|ty| ty.is_concrete(&generic_idents))
+        .map(|child| (child.parent, child.ty));
+
+    let sentinel = eligible_types.map(|(parent, ty)| {
+        define_spanned_export!(ty.span() => _sentinel);
+
+        match parent {
+            Some(p) if p.is_concrete(&generic_idents) => {
+                quote_spanned!(ty.span() => #_sentinel::resolve!(#ty, #p))
+            }
+            Some(_) | None => quote_spanned!(ty.span() => #_sentinel::resolve!(#ty)),
+        }
+    });
+
+    quote!(::std::vec![#(#sentinel),*])
 }
 
 fn codegen_route(route: Route) -> Result<TokenStream> {
@@ -241,6 +321,9 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
     let query_guards = query_decls(&route);
     let data_guard = route.data_guard.as_ref().map(data_guard_decl);
 
+    // Extract the sentinels from the route.
+    let sentinels = sentinels_expr(&route);
+
     // Gather info about the function.
     let (vis, handler_fn) = (&route.handler.vis, &route.handler);
     let handler_fn_name = &handler_fn.sig.ident;
@@ -248,6 +331,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
     let responder_outcome = responder_outcome_expr(&route);
 
     let method = route.attr.method;
+    let uri = route.attr.uri.to_string();
     let path = route.attr.uri.to_string();
     let rank = Optional(route.attr.rank);
     let format = Optional(route.attr.format.as_ref());
@@ -255,19 +339,19 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
     Ok(quote! {
         #handler_fn
 
-        #[doc(hidden)]
-        #[allow(non_camel_case_types)]
-        /// Rocket code generated proxy structure.
-        #vis struct #handler_fn_name {  }
+        // #[doc(hidden)]
+        // #[allow(non_camel_case_types)]
+        // /// Rocket code generated proxy structure.
+        // #vis struct #handler_fn_name {  }
 
-        /// Rocket code generated proxy static conversion implementation.
-        impl From<#handler_fn_name> for #_route::StaticInfo {
+        /// Rocket code generated proxy static conversion implementations.
+        impl #handler_fn_name {
             #[allow(non_snake_case, unreachable_patterns, unreachable_code)]
-            fn from(_: #handler_fn_name) -> #_route::StaticInfo {
-                fn monomorphized_function<'_b>(
-                    #__req: &'_b #Request<'_>,
-                    #__data: #Data
-                ) -> #_route::BoxFuture<'_b> {
+            fn into_info(self) -> #_route::StaticInfo {                
+                fn monomorphized_function<'__r>(
+                    #__req: &'__r #Request<'_>,
+                    #__data: #Data<'__r>
+                ) -> #_route::BoxFuture<'__r> {
                     use #_trace::Instrument as _;
                     #_Box::pin(async move {
                         #(#request_guards)*
@@ -276,41 +360,41 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                         #data_guard
 
                         #responder_outcome
-                    }.instrument(#_trace::info_span!(
+                    }
+                    .instrument(#_trace::info_span!(
                         stringify!(#handler_fn_name),
-                        method = %#method,
-                        path = #path,
+                        method = %#method,     
+                        path = #path,                   
                         "Route: {}", stringify!(#handler_fn_name)
-                    )))
+                    ))
+                )
                 }
 
                 #_route::StaticInfo {
                     name: stringify!(#handler_fn_name),
                     method: #method,
-                    path: #path,
+                    uri: #uri,
                     handler: monomorphized_function,
                     format: #format,
                     rank: #rank,
+                    sentinels: #sentinels,
                 }
             }
-        }
 
-        /// Rocket code generated proxy conversion implementation.
-        impl From<#handler_fn_name> for #Route {
-            #[inline]
-            fn from(_: #handler_fn_name) -> #Route {
-                #_route::StaticInfo::from(#handler_fn_name {}).into()
+            #[doc(hidden)]
+            pub fn into_route(self) -> #Route {
+                self.into_info().into()
             }
         }
 
         /// Rocket code generated wrapping URI macro.
         #internal_uri_macro
-    }.into())
+    })
 }
 
 fn complete_route(args: TokenStream, input: TokenStream) -> Result<TokenStream> {
     let function: syn::ItemFn = syn::parse2(input)
-        .map_err(|e| Diagnostic::from(e))
+        .map_err(Diagnostic::from)
         .map_err(|diag| diag.help("`#[route]` can only be used on functions"))?;
 
     let attr_tokens = quote!(route(#args));
@@ -328,10 +412,10 @@ fn incomplete_route(
     let method_span = StringLit::new(format!("#[{}]", method), Span::call_site())
         .subspan(2..2 + method_str.len());
 
-    let method_ident = syn::Ident::new(&method_str, method_span.into());
+    let method_ident = syn::Ident::new(&method_str, method_span);
 
     let function: syn::ItemFn = syn::parse2(input)
-        .map_err(|e| Diagnostic::from(e))
+        .map_err(Diagnostic::from)
         .map_err(|d| d.help(format!("#[{}] can only be used on functions", method_str)))?;
 
     let full_attr = quote!(#method_ident(#args));

@@ -1,15 +1,15 @@
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::convert::TryInto;
-use std::sync::Arc;
+use std::net::SocketAddr;
 
-use figment::{Figment, Provider};
-use either::Either;
 use yansi::Paint;
-use tokio::sync::Notify;
+use either::Either;
+use figment::{Figment, Provider};
 
-use crate::{Route, Catcher, Config, Shutdown};
+use crate::{Catcher, Config, Route, Shutdown, sentinel, shield::Shield};
 use crate::router::Router;
+use crate::trip_wire::TripWire;
 use crate::fairing::{Fairing, Fairings};
 use crate::phase::{Phase, Build, Building, Ignite, Igniting, Orbit, Orbiting};
 use crate::phase::{Stateful, StateRef, State};
@@ -55,7 +55,8 @@ use crate::trace::PaintExt;
 /// To launch an instance of `Rocket`, it _must_ progress through all three
 /// phases. To progress into the ignite or launch phases, a tokio `async`
 /// runtime is required. The [`#[main]`](crate::main) attribute initializes a
-/// Rocket-specific tokio runtime and runs attributed async code inside of it:
+/// Rocket-specific tokio runtime and runs the attributed `async fn` inside of
+/// it:
 ///
 /// ```rust,no_run
 /// #[rocket::main]
@@ -151,10 +152,15 @@ impl Rocket<Build> {
     /// }
     /// ```
     pub fn custom<T: Provider>(provider: T) -> Self {
-        Rocket(Building {
+        // We initialize the logger here so that logging from fairings and so on
+        // are visible; we use the final config to set a max log-level in ignite
+        
+        let rocket: Rocket<Build> = Rocket(Building {
             figment: Figment::from(provider),
             ..Default::default()
-        })
+        });
+
+        rocket.attach(Shield::default())
     }
 
     /// Sets the configuration provider in `self` to `provider`.
@@ -176,7 +182,7 @@ impl Rocket<Build> {
     /// let config = Config {
     ///     port: 7777,
     ///     address: Ipv4Addr::new(18, 127, 0, 1).into(),
-    ///     temp_dir: PathBuf::from("/tmp/config-example"),
+    ///     temp_dir: "/tmp/config-example".into(),
     ///     ..Config::debug_default()
     /// };
     ///
@@ -184,7 +190,7 @@ impl Rocket<Build> {
     /// let rocket = rocket::custom(&config).ignite().await?;
     /// assert_eq!(rocket.config().port, 7777);
     /// assert_eq!(rocket.config().address, Ipv4Addr::new(18, 127, 0, 1));
-    /// assert_eq!(rocket.config().temp_dir, Path::new("/tmp/config-example"));
+    /// assert_eq!(rocket.config().temp_dir.relative(), Path::new("/tmp/config-example"));
     ///
     /// // Create a new figment which modifies _some_ keys the existing figment:
     /// let figment = rocket.figment().clone()
@@ -197,7 +203,7 @@ impl Rocket<Build> {
     ///
     /// assert_eq!(rocket.config().port, 8888);
     /// assert_eq!(rocket.config().address, Ipv4Addr::new(171, 64, 200, 10));
-    /// assert_eq!(rocket.config().temp_dir, Path::new("/tmp/config-example"));
+    /// assert_eq!(rocket.config().temp_dir.relative(), Path::new("/tmp/config-example"));
     /// # Ok(())
     /// # });
     /// ```
@@ -206,6 +212,7 @@ impl Rocket<Build> {
         self
     }
 
+    #[track_caller]
     fn load<'a, B, T, F, M>(mut self, kind: &str, base: B, items: Vec<T>, m: M, f: F) -> Self
         where B: TryInto<Origin<'a>> + Clone + fmt::Display,
               B::Error: fmt::Display,
@@ -220,7 +227,8 @@ impl Rocket<Build> {
                 let _e = span.enter();
                 error!(%error);
                 panic!("aborting due to {} base error", kind);
-            });
+            }
+            );
 
         if base.query().is_some() {
             warn!("query in {} base '{}' is ignored", kind, Paint::white(&base));
@@ -235,10 +243,8 @@ impl Rocket<Build> {
                     error!(%error);
                     panic!("aborting due to invalid {} URI", kind);
                 });
-
-            f(&mut self, item)
-        }
-
+                f(&mut self, item);                
+            };                    
         self
     }
 
@@ -286,7 +292,7 @@ impl Rocket<Build> {
     /// use rocket::{Request, Route, Data, route};
     /// use rocket::http::Method;
     ///
-    /// fn hi<'r>(req: &'r Request, _: Data) -> route::BoxFuture<'r> {
+    /// fn hi<'r>(req: &'r Request, _: Data<'r>) -> route::BoxFuture<'r> {
     ///     route::Outcome::from(req, "Hello!").pin()
     /// }
     ///
@@ -296,6 +302,7 @@ impl Rocket<Build> {
     ///     rocket::build().mount("/hello", vec![hi_route])
     /// }
     /// ```
+    #[track_caller]
     pub fn mount<'a, B, R>(self, base: B, routes: R) -> Self
         where B: TryInto<Origin<'a>> + Clone + fmt::Display,
               B::Error: fmt::Display,
@@ -368,13 +375,13 @@ impl Rocket<Build> {
     /// struct MyString(String);
     ///
     /// #[get("/int")]
-    /// fn int(state: State<'_, MyInt>) -> String {
+    /// fn int(state: &State<MyInt>) -> String {
     ///     format!("The stateful int is: {}", state.0)
     /// }
     ///
     /// #[get("/string")]
-    /// fn string<'r>(state: State<'r, MyString>) -> &'r str {
-    ///     &state.inner().0
+    /// fn string(state: &State<MyString>) -> &str {
+    ///     &state.0
     /// }
     ///
     /// #[launch]
@@ -399,6 +406,9 @@ impl Rocket<Build> {
 
     /// Attaches a fairing to this instance of Rocket. No fairings are eagerly
     /// excuted; fairings are executed at their appropriate time.
+    ///
+    /// If the attached fairing is _fungible_ and a fairing of the same name
+    /// already exists, this fairing replaces it.
     ///
     /// # Example
     ///
@@ -433,6 +443,7 @@ impl Rocket<Build> {
     ///     secret key.
     ///   * There are no [`Route#collisions`] or [`Catcher#collisions`]
     ///     collisions.
+    ///   * No [`Sentinel`](crate::Sentinel) triggered an abort.
     ///
     /// If any of these conditions fail to be met, a respective [`Error`] is
     /// returned.
@@ -470,20 +481,19 @@ impl Rocket<Build> {
 
         // Extract the configuration; initialize the logger.
         #[allow(unused_mut)]
-        let mut config = self.figment.extract::<Config>().map_err(ErrorKind::Config)?;
+        let mut config = Config::try_from(&self.figment).map_err(ErrorKind::Config)?;
         crate::trace::try_init(&config);
 
         // Check for safely configured secrets.
         #[cfg(feature = "secrets")]
         if !config.secret_key.is_provided() {
-            let profile = self.figment.profile();
-            if profile != Config::DEBUG_PROFILE {
-                return Err(Error::new(ErrorKind::InsecureSecretKey(profile.clone())));
+            if config.profile != Config::DEBUG_PROFILE {
+                return Err(Error::new(ErrorKind::InsecureSecretKey(config.profile.clone())));
             }
 
             if config.secret_key.is_zero() {
                 config.secret_key = crate::config::SecretKey::generate()
-                    .unwrap_or(crate::config::SecretKey::zero());
+                    .unwrap_or_else(crate::config::SecretKey::zero);
             }
         };
 
@@ -499,18 +509,24 @@ impl Rocket<Build> {
         // Log everything we know: config, routes, catchers, fairings.
         // TODO: Store/print managed state type names?
         config.pretty_print(self.figment());
-        log_items("🛰  ", "Routes", self.routes(), |r| &r.uri.base, |r| &r.uri);
-        log_items("👾 ", "Catchers", self.catchers(), |c| &c.base, |c| &c.base);
+        log_items("📬 ", "Routes", self.routes(), |r| &r.uri.base, |r| &r.uri);
+        log_items("🥅 ", "Catchers", self.catchers(), |c| &c.base, |c| &c.base);
         self.fairings.pretty_print();
 
         // Ignite the rocket.
-        Ok(Rocket(Igniting {
+        let rocket: Rocket<Ignite> = Rocket(Igniting {
             router, config,
-            shutdown: Arc::new(Notify::new()),
+            shutdown: Shutdown(TripWire::new()),
             figment: self.0.figment,
             fairings: self.0.fairings,
             state: self.0.state,
-        }))
+        });
+
+        // Query the sentinels, abort if requested.
+        let sentinels = rocket.routes().flat_map(|r| r.sentinels.iter());
+        sentinel::query(sentinels, &rocket).map_err(ErrorKind::SentinelAborts)?;
+
+        Ok(rocket)
     }
 }
 
@@ -524,15 +540,15 @@ fn log_items<T, I, B, O>(e: &str, t: &str, items: I, base: B, origin: O)
     }
 
     items.sort_by_key(|i| origin(i).path().as_str().chars().count());
-    items.sort_by_key(|i| origin(i).path_segments().len());
+    items.sort_by_key(|i| origin(i).path().segments().len());
     items.sort_by_key(|i| base(i).path().as_str().chars().count());
-    items.sort_by_key(|i| base(i).path_segments().len());
     items.iter().for_each(|i| info!(target: "rocket::support", "{}", i));
 }
 
 impl Rocket<Ignite> {
     /// Returns the finalized, active configuration. This is guaranteed to
     /// remain stable through ignition and into orbit.
+    ///
     ///
     /// # Example
     ///
@@ -548,18 +564,14 @@ impl Rocket<Ignite> {
         &self.config
     }
 
-    /// Returns a handle which can be used to notify this instance of Rocket to
-    /// stop serving connections, resolving the future returned by
-    /// [`Rocket::launch()`]. If [`Shutdown::notify()`] is called _before_ the
-    /// instance is launched, it will be immediately shutdown after liftoff.
+    /// Returns a handle which can be used to trigger a shutdown and detect a
+    /// triggered shutdown.
     ///
-    /// # Caveats
-    ///
-    /// Due to [bugs](https://github.com/hyperium/hyper/issues/1885) in Rocket's
-    /// upstream HTTP library, graceful shutdown currently works by stopping new
-    /// connections from arriving without stopping in-process connections from
-    /// sending or receiving. As a result, shutdown will stall if a response is
-    /// infinite or if a client stalls a connection.
+    /// A completed graceful shutdown resolves the future returned by
+    /// [`Rocket::launch()`]. If [`Shutdown::notify()`] is called _before_ an
+    /// instance is launched, it will be immediately shutdown after liftoff. See
+    /// [`Shutdown`] and [`config::Shutdown`](crate::config::Shutdown) for
+    /// details on graceful shutdown.
     ///
     /// # Example
     ///
@@ -585,7 +597,7 @@ impl Rocket<Ignite> {
     /// }
     /// ```
     pub fn shutdown(&self) -> Shutdown {
-        Shutdown(self.shutdown.clone())
+        self.shutdown.clone()
     }
 
     fn into_orbit(self) -> Rocket<Orbit> {
@@ -613,7 +625,8 @@ impl Rocket<Ignite> {
             rkt.fairings.handle_liftoff(&rkt).await;
 
             let proto = rkt.config.tls_enabled().then(|| "https").unwrap_or("http");
-            let addr = format!("{}://{}:{}", proto, rkt.config.address, rkt.config.port);
+            let socket_addr = SocketAddr::new(rkt.config.address, rkt.config.port);
+            let addr = format!("{}://{}", proto, socket_addr);
             info!(target: "rocket::support", "{}{} {}",
                 Paint::emoji("🚀 "),
                 Paint::default("Rocket has launched from").bold(),
@@ -645,17 +658,13 @@ impl Rocket<Orbit> {
         &self.config
     }
 
-    /// Returns a handle which can be used to notify this instance of Rocket to
-    /// stop serving connections, resolving the future returned by
-    /// [`Rocket::launch()`].
+    /// Returns a handle which can be used to trigger a shutdown and detect a
+    /// triggered shutdown.
     ///
-    /// # Caveats
-    ///
-    /// Due to [bugs](https://github.com/hyperium/hyper/issues/1885) in Rocket's
-    /// upstream HTTP library, graceful shutdown currently works by stopping new
-    /// connections from arriving without stopping in-process connections from
-    /// sending or receiving. As a result, shutdown will stall if a response is
-    /// infinite or if a client stalls a connection.
+    /// A completed graceful shutdown resolves the future returned by
+    /// [`Rocket::launch()`]. See [`Shutdown`] and
+    /// [`config::Shutdown`](crate::config::Shutdown) for details on graceful
+    /// shutdown.
     ///
     /// # Example
     ///
@@ -677,7 +686,7 @@ impl Rocket<Orbit> {
     /// }
     /// ```
     pub fn shutdown(&self) -> Shutdown {
-        Shutdown(self.shutdown.clone())
+        self.shutdown.clone()
     }
 }
 
@@ -812,8 +821,7 @@ impl<P: Phase> Rocket<P> {
     ///
     /// The `Future` resolves as an `Ok` if any of the following occur:
     ///
-    ///   * the server is shutdown via [`Shutdown::notify()`].
-    ///   * if the `ctrlc` config option is `true`, when `Ctrl+C` is pressed.
+    ///   * graceful shutdown via [`Shutdown::notify()`] completes.
     ///
     /// The `Future` does not resolve otherwise.
     ///

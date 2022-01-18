@@ -15,11 +15,11 @@ members = [
   "templating",
   "testing",
   "tls",
-  "uuid",
 
   "pastebin",
   "todo",
 
   "trace_env_logger",
   "trace_subscriber",
+  "chat",
 ]

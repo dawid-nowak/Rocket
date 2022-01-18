@@ -1,13 +1,14 @@
-use std::io;
-use std::pin::Pin;
+use std::{io, time::Duration};
 use std::task::{Poll, Context};
+use std::pin::Pin;
 
-use bytes::BytesMut;
-use tokio::io::{AsyncRead, ReadBuf};
+use bytes::{Bytes, BytesMut};
 use pin_project_lite::pin_project;
-use futures::{ready, stream::Stream};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::time::{sleep, Sleep};
 
-use crate::http::hyper::Bytes;
+use futures::stream::Stream;
+use futures::future::{self, Future, FutureExt};
 
 pin_project! {
     pub struct ReaderStream<R> {
@@ -115,7 +116,7 @@ impl<T: AsyncRead, U: AsyncRead> AsyncRead for Chain<T, U> {
 
         if !*me.done_first {
             let init_rem = buf.remaining();
-            ready!(me.first.poll_read(cx, buf))?;
+            futures::ready!(me.first.poll_read(cx, buf))?;
             if buf.remaining() == init_rem {
                 *me.done_first = true;
             } else {
@@ -123,5 +124,300 @@ impl<T: AsyncRead, U: AsyncRead> AsyncRead for Chain<T, U> {
             }
         }
         me.second.poll_read(cx, buf)
+    }
+}
+
+enum State {
+    /// I/O has not been cancelled. Proceed as normal.
+    Active,
+    /// I/O has been cancelled. See if we can finish before the timer expires.
+    Grace(Pin<Box<Sleep>>),
+    /// Grace period elapsed. Shutdown the connection, waiting for the timer
+    /// until we force close.
+    Mercy(Pin<Box<Sleep>>),
+    /// We failed to shutdown and are force-closing the connection.
+    Terminated,
+    /// We successfully shutdown the connection.
+    Inactive,
+}
+
+pin_project! {
+    /// I/O that can be cancelled when a future `F` resolves.
+    #[must_use = "futures do nothing unless polled"]
+    pub struct CancellableIo<F, I> {
+        #[pin]
+        io: I,
+        #[pin]
+        trigger: future::Fuse<F>,
+        state: State,
+        grace: Duration,
+        mercy: Duration,
+    }
+}
+
+impl<F: Future, I: AsyncWrite> CancellableIo<F, I> {
+    pub fn new(trigger: F, io: I, grace: Duration, mercy: Duration) -> Self {
+        CancellableIo {
+            io, grace, mercy,
+            trigger: trigger.fuse(),
+            state: State::Active
+        }
+    }
+
+    /// Returns `Ok(true)` if connection processing should continue.
+    fn poll_trigger_then<T>(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        io: impl FnOnce(Pin<&mut I>, &mut Context<'_>) -> Poll<io::Result<T>>,
+    ) -> Poll<io::Result<T>> {
+        let mut me = self.project();
+
+        // CORRECTNESS: _EVERY_ branch must reset `state`! If `state` is
+        // unchanged in a branch, that branch _must_ `break`! No `return`!
+        let mut state = std::mem::replace(me.state, State::Active);
+        let result = loop {
+            match state {
+                State::Active => {
+                    if me.trigger.as_mut().poll(cx).is_ready() {
+                        state = State::Grace(Box::pin(sleep(*me.grace)));
+                    } else {
+                        state = State::Active;
+                        break io(me.io, cx);
+                    }
+                }
+                State::Grace(mut sleep) => {
+                    if sleep.as_mut().poll(cx).is_ready() {
+                        if let Some(deadline) = sleep.deadline().checked_add(*me.mercy) {
+                            sleep.as_mut().reset(deadline);
+                            state = State::Mercy(sleep);
+                        } else {
+                            state = State::Terminated;
+                        }
+                    } else {
+                        state = State::Grace(sleep);
+                        break io(me.io, cx);
+                    }
+                },
+                State::Mercy(mut sleep) => {
+                    if sleep.as_mut().poll(cx).is_ready() {
+                        state = State::Terminated;
+                        continue;
+                    }
+
+                    match me.io.as_mut().poll_shutdown(cx) {
+                        Poll::Ready(Err(e)) => {
+                            state = State::Terminated;
+                            break Poll::Ready(Err(e));
+                        }
+                        Poll::Ready(Ok(())) => {
+                            state = State::Inactive;
+                            break Poll::Ready(Err(gone()));
+                        }
+                        Poll::Pending => {
+                            state = State::Mercy(sleep);
+                            break Poll::Pending;
+                        }
+                    }
+                },
+                State::Terminated => {
+                    // Just in case, as a last ditch effort. Ignore pending.
+                    state = State::Terminated;
+                    let _ = me.io.as_mut().poll_shutdown(cx);
+                    break Poll::Ready(Err(time_out()));
+                },
+                State::Inactive => {
+                    state = State::Inactive;
+                    break Poll::Ready(Err(gone()));
+                }
+            }
+        };
+
+        *me.state = state;
+        result
+    }
+}
+
+fn time_out() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "Shutdown grace timed out")
+}
+
+fn gone() -> io::Error {
+    io::Error::new(io::ErrorKind::BrokenPipe, "IO driver has terminated")
+}
+
+impl<F: Future, I: AsyncRead + AsyncWrite> AsyncRead for CancellableIo<F, I> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.as_mut().poll_trigger_then(cx, |io, cx| io.poll_read(cx, buf))
+    }
+}
+
+impl<F: Future, I: AsyncWrite> AsyncWrite for CancellableIo<F, I> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        self.as_mut().poll_trigger_then(cx, |io, cx| io.poll_write(cx, buf))
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<io::Result<()>> {
+        self.as_mut().poll_trigger_then(cx, |io, cx| io.poll_flush(cx))
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<io::Result<()>> {
+        self.as_mut().poll_trigger_then(cx, |io, cx| io.poll_shutdown(cx))
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        self.as_mut().poll_trigger_then(cx, |io, cx| io.poll_write_vectored(cx, bufs))
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.io.is_write_vectored()
+    }
+}
+
+use crate::http::private::{Listener, Connection, RawCertificate};
+
+impl<F: Future, C: Connection> Connection for CancellableIo<F, C> {
+    fn peer_address(&self) -> Option<std::net::SocketAddr> {
+        self.io.peer_address()
+    }
+
+    fn peer_certificates(&self) -> Option<Vec<RawCertificate>> {
+        self.io.peer_certificates()
+    }
+}
+
+pin_project! {
+    pub struct CancellableListener<F, L> {
+        pub trigger: F,
+        #[pin]
+        pub listener: L,
+        pub grace: Duration,
+        pub mercy: Duration,
+    }
+}
+
+impl<F, L> CancellableListener<F, L> {
+    pub fn new(trigger: F, listener: L, grace: u64, mercy: u64) -> Self {
+        let (grace, mercy) = (Duration::from_secs(grace), Duration::from_secs(mercy));
+        CancellableListener { trigger, listener, grace, mercy }
+    }
+}
+
+impl<L: Listener, F: Future + Clone> Listener for CancellableListener<F, L> {
+    type Connection = CancellableIo<F, L::Connection>;
+
+    fn local_addr(&self) -> Option<std::net::SocketAddr> {
+        self.listener.local_addr()
+    }
+
+    fn poll_accept(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<io::Result<Self::Connection>> {
+        self.as_mut().project().listener
+            .poll_accept(cx)
+            .map(|res| res.map(|conn| {
+                CancellableIo::new(self.trigger.clone(), conn, self.grace, self.mercy)
+            }))
+    }
+}
+
+pub trait StreamExt: Sized + Stream {
+    fn join<U>(self, other: U) -> Join<Self, U>
+        where U: Stream<Item = Self::Item>;
+}
+
+impl<S: Stream> StreamExt for S {
+    fn join<U>(self, other: U) -> Join<Self, U>
+        where U: Stream<Item = Self::Item>
+    {
+        Join::new(self, other)
+    }
+}
+
+pin_project! {
+    /// Stream returned by the [`join`](super::StreamExt::join) method.
+    pub struct Join<T, U> {
+        #[pin]
+        a: T,
+        #[pin]
+        b: U,
+        // When `true`, poll `a` first, otherwise, `poll` b`.
+        toggle: bool,
+        // Set when either `a` or `b` return `None`.
+        done: bool,
+    }
+}
+
+impl<T, U> Join<T, U> {
+    pub(super) fn new(a: T, b: U) -> Join<T, U>
+        where T: Stream, U: Stream,
+    {
+        Join { a, b, toggle: false, done: false, }
+    }
+
+    fn poll_next<A: Stream, B: Stream<Item = A::Item>>(
+        first: Pin<&mut A>,
+        second: Pin<&mut B>,
+        done: &mut bool,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<A::Item>> {
+        match first.poll_next(cx) {
+            Poll::Ready(opt) => { *done = opt.is_none(); Poll::Ready(opt) }
+            Poll::Pending => match second.poll_next(cx) {
+                Poll::Ready(opt) => { *done = opt.is_none(); Poll::Ready(opt) }
+                Poll::Pending => Poll::Pending
+            }
+        }
+    }
+}
+
+impl<T, U> Stream for Join<T, U>
+    where T: Stream,
+          U: Stream<Item = T::Item>,
+{
+    type Item = T::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<T::Item>> {
+        if self.done {
+            return Poll::Ready(None);
+        }
+
+        let me = self.project();
+        *me.toggle = !*me.toggle;
+        match *me.toggle {
+            true => Self::poll_next(me.a, me.b, me.done, cx),
+            false => Self::poll_next(me.b, me.a, me.done, cx),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (left_low, left_high) = self.a.size_hint();
+        let (right_low, right_high) = self.b.size_hint();
+
+        let low = left_low.saturating_add(right_low);
+        let high = match (left_high, right_high) {
+            (Some(h1), Some(h2)) => h1.checked_add(h2),
+            _ => None,
+        };
+
+        (low, high)
     }
 }

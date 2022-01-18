@@ -43,7 +43,7 @@ Then add the usual Rocket dependencies to the `Cargo.toml` file:
 
 ```toml
 [dependencies]
-rocket = "0.5.0-dev"
+rocket = "0.5.0-rc.1"
 ```
 
 And finally, create a skeleton Rocket application to work off of in
@@ -224,7 +224,7 @@ use rocket::Data;
 use rocket::response::Debug;
 
 #[post("/", data = "<paste>")]
-fn upload(paste: Data) -> std::io::Result<String> {
+fn upload(paste: Data<'_>) -> std::io::Result<String> {
     # unimplemented!()
     /* .. */
 }
@@ -255,7 +255,7 @@ use rocket::response::Debug;
 use rocket::data::{Data, ToByteUnit};
 
 #[post("/", data = "<paste>")]
-async fn upload(paste: Data) -> Result<String, Debug<std::io::Error>> {
+async fn upload(paste: Data<'_>) -> Result<String, Debug<std::io::Error>> {
     let id = PasteId::new(3);
     let filename = format!("upload/{id}", id = id);
     let url = format!("{host}/{id}\n", host = "http://localhost:8000", id = id);

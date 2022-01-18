@@ -32,7 +32,7 @@ that can be used to solve problems in a clean, composable, and robust manner.
   effected through fairings. You should **_not_** use a fairing to implement
   authentication or authorization (preferring to use a [request guard] instead)
   _unless_ the authentication or authorization applies to all or the
-  overwhelming majority application. On the other hand, you _should_ use a
+  overwhelming majority of the application. On the other hand, you _should_ use a
   fairing to record timing and usage statistics or to enforce global security
   policies.
 
@@ -54,20 +54,21 @@ example, the following snippet attached two fairings, `req_fairing` and
 fn rocket() -> _ {
     # let req_fairing = rocket::fairing::AdHoc::on_request("example", |_, _| Box::pin(async {}));
     # let res_fairing = rocket::fairing::AdHoc::on_response("example", |_, _| Box::pin(async {}));
-
     rocket::build()
         .attach(req_fairing)
         .attach(res_fairing)
 }
 ```
 
+Fairings are executed in the order in which they are attached: the first
+attached fairing has its callbacks executed before all others. A fairing can be
+attached any number of times. Except for [singleton fairings], all attached
+instances are polled at runtime. Fairing callbacks may not be commutative; the
+order in which fairings are attached may be significant.
+
+[singleton fairings]: @api/rocket/fairing/trait.Fairing.html#singletons
 [`attach`]: @api/rocket/struct.Rocket.html#method.attach
 [`Rocket`]: @api/rocket/struct.Rocket.html
-
-Fairings are executed in the order in which they are attached: the first
-attached fairing has its callbacks executed before all others. Because fairing
-callbacks may not be commutative, the order in which fairings are attached may
-be significant.
 
 ### Callbacks
 
@@ -77,7 +78,7 @@ events is described below:
   * **Ignite (`on_ignite`)**
 
     An ignite callback is called during [ignition] An ignite callback can
-    arbitrarily modify the `Rocket` instance being build. They are are commonly
+    arbitrarily modify the `Rocket` instance being built. They are commonly
     used to parse and validate configuration values, aborting on bad
     configurations, and inserting the parsed value into managed state for later
     retrieval.
@@ -170,7 +171,7 @@ impl Fairing for Counter {
     }
 
     // Increment the counter for `GET` and `POST` requests.
-    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data) {
+    async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
         match request.method() {
             Method::Get => self.get.fetch_add(1, Ordering::Relaxed),
             Method::Post => self.post.fetch_add(1, Ordering::Relaxed),

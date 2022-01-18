@@ -37,7 +37,7 @@ use super::Client;
 ///
 /// // Check metadata validity.
 /// assert_eq!(response.status(), Status::Ok);
-/// assert_eq!(response.body().unwrap().known_size(), Some(13));
+/// assert_eq!(response.body().preset_size(), Some(13));
 ///
 /// // Read 10 bytes of the body. Note: in reality, we'd use `into_string()`.
 /// let mut buffer = [0; 10];
@@ -63,12 +63,26 @@ impl LocalResponse<'_> {
         self.inner._cookies()
     }
 
-    fn _into_string(self) -> Option<String> {
+    fn _into_string(self) -> io::Result<String> {
         self.client.block_on(self.inner._into_string())
     }
 
-    fn _into_bytes(self) -> Option<Vec<u8>> {
+    fn _into_bytes(self) -> io::Result<Vec<u8>> {
         self.client.block_on(self.inner._into_bytes())
+    }
+
+    #[cfg(feature = "json")]
+    fn _into_json<T: Send + 'static>(self) -> Option<T>
+        where T: serde::de::DeserializeOwned
+    {
+        serde_json::from_reader(self).ok()
+    }
+
+    #[cfg(feature = "msgpack")]
+    fn _into_msgpack<T: Send + 'static>(self) -> Option<T>
+        where T: serde::de::DeserializeOwned
+    {
+        rmp_serde::from_read(self).ok()
     }
 
     // Generates the public API methods, which call the private methods above.

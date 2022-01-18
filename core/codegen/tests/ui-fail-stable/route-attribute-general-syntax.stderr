@@ -4,7 +4,7 @@ error: missing expected parameter: `uri`
 4 | #[get()]
   | ^^^^^^^^
   |
-  = note: this error originates in an attribute macro (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the attribute macro `get` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `fn`
   --- help: #[get] can only be used on functions
@@ -64,8 +64,8 @@ error: expected key/value `key = value`
 33 | #[get("/", ...)]
    |            ^^^
 
-error: handler arguments cannot be ignored
-  --- note: handler arguments must be of the form: `ident: Type`
+error: handler arguments must be named
+  --- help: to name an ignored handler argument, use `_name`
   --> $DIR/route-attribute-general-syntax.rs:39:7
    |
 39 | fn c1(_: usize) {}

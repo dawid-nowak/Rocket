@@ -24,13 +24,37 @@ pub trait Listener {
     fn local_addr(&self) -> Option<SocketAddr>;
 
     /// Try to accept an incoming Connection if ready
-    fn poll_accept(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<Self::Connection>>;
+    fn poll_accept(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<io::Result<Self::Connection>>;
 }
+
+/// A thin wrapper over raw, DER-encoded X.509 client certificate data.
+#[cfg(not(feature = "tls"))]
+#[derive(Clone, Eq, PartialEq)]
+pub struct RawCertificate(pub Vec<u8>);
+
+/// A thin wrapper over raw, DER-encoded X.509 client certificate data.
+// NOTE: `rustls::Certificate` is exactly isomorphic to `RawCertificate`.
+#[doc(inline)]
+#[cfg(feature = "tls")]
+pub use rustls::Certificate as RawCertificate;
 
 /// A 'Connection' represents an open connection to a client
 pub trait Connection: AsyncRead + AsyncWrite {
-    /// The remote address, i.e. the client's socket address.
-    fn remote_addr(&self) -> Option<SocketAddr>;
+    /// The remote address, i.e. the client's socket address, if it is known.
+    fn peer_address(&self) -> Option<SocketAddr>;
+
+    /// DER-encoded X.509 certificate chain presented by the client, if any.
+    ///
+    /// The certificate order must be as it appears in the TLS protocol: the
+    /// first certificate relates to the peer, the second certifies the first,
+    /// the third certifies the second, and so on.
+    ///
+    /// Defaults to an empty vector to indicate that no certificates were
+    /// presented.
+    fn peer_certificates(&self) -> Option<Vec<RawCertificate>> { None }
 }
 
 pin_project_lite::pin_project! {
@@ -40,16 +64,17 @@ pin_project_lite::pin_project! {
     /// Accept). This type is internal to Rocket.
     #[must_use = "streams do nothing unless polled"]
     pub struct Incoming<L> {
-        listener: L,
         sleep_on_errors: Option<Duration>,
         #[pin]
         pending_error_delay: Option<Sleep>,
+        #[pin]
+        listener: L,
     }
 }
 
 impl<L: Listener> Incoming<L> {
     /// Construct an `Incoming` from an existing `Listener`.
-    pub fn from_listener(listener: L) -> Self {
+    pub fn new(listener: L) -> Self {
         Self {
             listener,
             sleep_on_errors: Some(Duration::from_millis(250)),
@@ -96,7 +121,7 @@ impl<L: Listener> Incoming<L> {
 
             me.pending_error_delay.set(None);
 
-            match me.listener.poll_accept(cx) {
+            match me.listener.as_mut().poll_accept(cx) {
                 Poll::Ready(Ok(stream)) => {
                     return Poll::Ready(Ok(stream));
                 },
@@ -110,9 +135,8 @@ impl<L: Listener> Incoming<L> {
                     }
 
                     if let Some(duration) = me.sleep_on_errors {
-                        error!("connection accept error: {}", e);
-
                         // Sleep for the specified duration
+                        error!("connection accept error: {}", e);
                         me.pending_error_delay.set(Some(tokio::time::sleep(*duration)));
                     } else {
                         return Poll::Ready(Err(e));
@@ -123,7 +147,7 @@ impl<L: Listener> Incoming<L> {
     }
 }
 
-impl<L: Listener + Unpin> Accept for Incoming<L> {
+impl<L: Listener> Accept for Incoming<L> {
     type Conn = L::Connection;
     type Error = io::Error;
 
@@ -171,13 +195,16 @@ impl Listener for TcpListener {
         self.local_addr().ok()
     }
 
-    fn poll_accept(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<Self::Connection>> {
+    fn poll_accept(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>
+    ) -> Poll<io::Result<Self::Connection>> {
         (*self).poll_accept(cx).map_ok(|(stream, _addr)| stream)
     }
 }
 
 impl Connection for TcpStream {
-    fn remote_addr(&self) -> Option<SocketAddr> {
+    fn peer_address(&self) -> Option<SocketAddr> {
         self.peer_addr().ok()
     }
 }

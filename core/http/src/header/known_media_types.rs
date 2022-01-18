@@ -2,8 +2,10 @@ macro_rules! known_media_types {
     ($cont:ident) => ($cont! {
         Any (is_any): "any media type", "*", "*",
         Binary (is_binary): "binary data", "application", "octet-stream",
+        Bytes (is_bytes): "binary data", "application", "octet-stream",
         HTML (is_html): "HTML", "text", "html" ; "charset" => "utf-8",
         Plain (is_plain): "plain text", "text", "plain" ; "charset" => "utf-8",
+        Text (is_text): "plain text", "text", "plain" ; "charset" => "utf-8",
         JSON (is_json): "JSON", "application", "json",
         MsgPack (is_msgpack): "MsgPack", "application", "msgpack",
         Form (is_form): "forms", "application", "x-www-form-urlencoded",
@@ -41,6 +43,8 @@ macro_rules! known_media_types {
         MOV (is_mov): "quicktime video", "video", "quicktime",
         MP4 (is_mp4): "MPEG4 Video", "video", "mp4",
         ZIP (is_zip): "ZIP archive", "application", "zip",
+        EventStream (is_event_stream): "SSE stream", "text", "event-stream",
+        Markdown (is_markdown): "markdown text", "text", "markdown" ; "charset" => "utf-8",
     })
 }
 
@@ -88,6 +92,8 @@ macro_rules! known_extensions {
         "tiff" => TIFF,
         "mov" => MOV,
         "zip" => ZIP,
+        "md" => Markdown,
+        "markdown" => Markdown,
     })
 }
 
@@ -95,8 +101,10 @@ macro_rules! known_shorthands {
     ($cont:ident) => ($cont! {
         "any" => Any,
         "binary" => Binary,
+        "bytes" => Bytes,
         "html" => HTML,
         "plain" => Plain,
+        "text" => Text,
         "json" => JSON,
         "msgpack" => MsgPack,
         "form" => Form,
@@ -105,5 +113,7 @@ macro_rules! known_shorthands {
         "multipart" => FormData,
         "xml" => XML,
         "pdf" => PDF,
+        "markdown" => Markdown,
+        "md" => Markdown,
     })
 }

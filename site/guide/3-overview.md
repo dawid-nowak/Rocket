@@ -141,7 +141,7 @@ Rocket begins serving requests after being _launched_, which starts a
 multi-threaded asynchronous server and dispatches requests to matching routes as
 they arrive.
 
-There are two mechnisms by which a `Rocket` can be launched. The first and
+There are two mechanisms by which a `Rocket` can be launched. The first and
 preferred approach is via the `#[launch]` route attribute, which generates a
 `main` function that sets up an async runtime and starts the server. With
 `#[launch]`, our complete _Hello, world!_ application looks like:
@@ -209,11 +209,11 @@ runtime but unlike `#[launch]`, allows _you_ to start the server:
 # }
 
 #[rocket::main]
-async fn main() {
+async fn main() -> Result<(), rocket::Error> {
     rocket::build()
         .mount("/hello", routes![world])
         .launch()
-        .await;
+        .await
 }
 ```
 
@@ -258,7 +258,7 @@ You can find async-ready libraries on [crates.io](https://crates.io) with the
 
 ! note
 
-  Rocket master uses the tokio runtime. The runtime is started for you if you
+  Rocket v0.5 uses the tokio runtime. The runtime is started for you if you
   use `#[launch]` or `#[rocket::main]`, but you can still `launch()` a Rocket
   instance on a custom-built runtime by not using _either_ attribute.
 
@@ -298,12 +298,12 @@ necessary, you can convert a synchronous operation to an async one with
 ```rust
 # #[macro_use] extern crate rocket;
 use std::io;
+
 use rocket::tokio::task::spawn_blocking;
-use rocket::response::Debug;
 
 #[get("/blocking_task")]
-async fn blocking_task() -> Result<Vec<u8>, Debug<io::Error>> {
-    // In a real app, use rocket::response::NamedFile or tokio::fs::File.
+async fn blocking_task() -> io::Result<Vec<u8>> {
+    // In a real app, use rocket::fs::NamedFile or tokio::fs::File.
     let vec = spawn_blocking(|| std::fs::read("data.txt")).await
         .map_err(|e| io::Error::new(io::ErrorKind::Interrupted, e))??;
 

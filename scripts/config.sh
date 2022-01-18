@@ -41,13 +41,12 @@ CORE_ROOT=$(relative "core") || exit $?
 CONTRIB_ROOT=$(relative "contrib") || exit $?
 SITE_ROOT=$(relative "site") || exit $?
 BENCHMARKS_ROOT=$(relative "benchmarks") || exit $?
+FUZZ_ROOT=$(relative "core/lib/fuzz") || exit $?
 
 # Root of project-like directories.
 CORE_LIB_ROOT=$(relative "core/lib") || exit $?
 CORE_CODEGEN_ROOT=$(relative "core/codegen") || exit $?
 CORE_HTTP_ROOT=$(relative "core/http") || exit $?
-CONTRIB_LIB_ROOT=$(relative "contrib/lib") || exit $?
-CONTRIB_CODEGEN_ROOT=$(relative "contrib/codegen") || exit $?
 GUIDE_TESTS_ROOT=$(relative "site/tests") || exit $?
 
 # Root of infrastructure directories.
@@ -59,14 +58,14 @@ VERSION=$(git grep -h "^version" "${CORE_LIB_ROOT}" | head -n 1 | cut -d '"' -f2
 MAJOR_VERSION=$(echo "${VERSION}" | cut -d'.' -f1-2)
 VIRTUAL_CODENAME="$(git branch --show-current)"
 PHYSICAL_CODENAME="v${MAJOR_VERSION}"
-CURRENT_RELEASE=false
+CURRENT_RELEASE=true
 PRE_RELEASE=true
 
 # A generated codename for this version. Use the git branch for pre-releases.
 case $PRE_RELEASE in
   true)
     CODENAME="${VIRTUAL_CODENAME}"
-    DOC_VERSION="${CODENAME}-$(future_date)"
+    DOC_VERSION="${VERSION}-$(future_date)"
     ;;
   false)
     CODENAME="${PHYSICAL_CODENAME}"
@@ -74,12 +73,29 @@ case $PRE_RELEASE in
     ;;
 esac
 
-ALL_PROJECT_DIRS=(
+CORE_CRATE_ROOTS=(
     "${CORE_HTTP_ROOT}"
     "${CORE_CODEGEN_ROOT}"
     "${CORE_LIB_ROOT}"
-    "${CONTRIB_CODEGEN_ROOT}"
-    "${CONTRIB_LIB_ROOT}"
+)
+
+CONTRIB_SYNC_DB_POOLS_CRATE_ROOTS=(
+    "${CONTRIB_ROOT}/sync_db_pools/lib"
+    "${CONTRIB_ROOT}/sync_db_pools/codegen"
+)
+
+CONTRIB_DB_POOLS_CRATE_ROOTS=(
+    "${CONTRIB_ROOT}/db_pools/lib"
+    "${CONTRIB_ROOT}/db_pools/codegen"
+)
+
+ALL_CRATE_ROOTS=(
+    "${CORE_HTTP_ROOT}"
+    "${CORE_CODEGEN_ROOT}"
+    "${CORE_LIB_ROOT}"
+    "${CONTRIB_ROOT}/sync_db_pools/codegen"
+    "${CONTRIB_ROOT}/sync_db_pools/lib"
+    "${CONTRIB_ROOT}/dyn_templates"
 )
 
 function print_environment() {
@@ -98,12 +114,10 @@ function print_environment() {
   echo "  CORE_LIB_ROOT: ${CORE_LIB_ROOT}"
   echo "  CORE_CODEGEN_ROOT: ${CORE_CODEGEN_ROOT}"
   echo "  CORE_HTTP_ROOT: ${CORE_HTTP_ROOT}"
-  echo "  CONTRIB_LIB_ROOT: ${CONTRIB_LIB_ROOT}"
-  echo "  CONTRIB_CODEGEN_ROOT: ${CONTRIB_CODEGEN_ROOT}"
   echo "  GUIDE_TESTS_ROOT: ${GUIDE_TESTS_ROOT}"
   echo "  EXAMPLES_DIR: ${EXAMPLES_DIR}"
   echo "  DOC_DIR: ${DOC_DIR}"
-  echo "  ALL_PROJECT_DIRS: ${ALL_PROJECT_DIRS[*]}"
+  echo "  ALL_CRATE_ROOTS: ${ALL_CRATE_ROOTS[*]}"
   echo "  date(): $(future_date)"
 }
 

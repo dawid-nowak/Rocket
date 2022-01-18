@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use crate::form::prelude::*;
 use crate::http::uncased::AsUncased;
 
-/// Trait for implementing form guards: types parseable from HTTP form fields.
+/// Trait implemented by form guards: types parseable from HTTP forms.
 ///
 /// Only form guards that are _collections_, that is, collect more than one form
 /// field while parsing, should implement `FromForm`. All other types should
@@ -60,11 +60,11 @@ use crate::http::uncased::AsUncased;
 ///
 /// [`Form`]: crate::form::Form
 /// [`FromForm`]: crate::form::FromForm
-/// [`FromForm` derive]: ../derive.FromForm.html
+/// [`FromForm` derive]: derive@crate::FromForm
 /// [FromFormField]: crate::form::FromFormField
 /// [`shift()`ed]: NameView::shift()
 /// [`key()`]: NameView::key()
-/// [forms guide]: https://rocket.rs/master/guide/requests/#forms
+/// [forms guide]: https://rocket.rs/v0.5-rc/guide/requests/#forms
 ///
 /// # Parsing Strategy
 ///
@@ -75,7 +75,7 @@ use crate::http::uncased::AsUncased;
 ///
 /// Most type inherit their strategy on [`FromForm::init()`], but some types
 /// like `Option` override the requested strategy. The strategy can also be
-/// overwritted manually, per-field or per-value, by using the [`Strict`] or
+/// overwritten manually, per-field or per-value, by using the [`Strict`] or
 /// [`Lenient`] form guard:
 ///
 /// ```rust
@@ -129,7 +129,7 @@ use crate::http::uncased::AsUncased;
 /// [`Lenient<T>`]: crate::form::Lenient
 /// [`HashMap<K, V>`]: std::collections::HashMap
 /// [`BTreeMap<K, V>`]: std::collections::BTreeMap
-/// [`TempFile`]: crate::data::TempFile
+/// [`TempFile`]: crate::fs::TempFile
 /// [`Capped<C>`]: crate::data::Capped
 /// [`time::DateTime`]: time::PrimitiveDateTime
 /// [`IpAddr`]: std::net::IpAddr
@@ -161,11 +161,11 @@ use crate::http::uncased::AsUncased;
 ///     pushed to `K`'s parser and the remaining shifted field is pushed to
 ///     `V`'s parser.
 ///
-///     If the key has two indices (`map[index:k]=value` or
-///     `map[index:v]=value`), the second index must start with `k` or `v`. If
-///     the second index starts with `k`, the shifted field is pushed to `K`'s
-///     parser. If the second index starts with `v`, the shifted field is pushed
-///     to `V`'s parser. If the second index is anything else, an error is
+///     If the key has two indices (`map[k:index]=value` or
+///     `map[v:index]=value`), the first index must start with `k` or `v`. If
+///     the first index starts with `k`, the shifted field is pushed to `K`'s
+///     parser. If the first index starts with `v`, the shifted field is pushed
+///     to `V`'s parser. If the first index is anything else, an error is
 ///     created for the offending form field.
 ///
 ///     Errors are collected as they occur. Finalization finalizes all pairs and

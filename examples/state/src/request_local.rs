@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rocket::State;
-use rocket::outcome::Outcome;
+use rocket::outcome::{Outcome, try_outcome};
 use rocket::request::{self, FromRequest, Request};
 use rocket::fairing::AdHoc;
 use rocket::trace::info;
@@ -24,7 +24,7 @@ impl<'r> FromRequest<'r> for Guard1 {
     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, ()> {
         info!("-- 1 --");
 
-        let atomics = try_outcome!(req.guard::<State<'_, Atomics>>().await);
+        let atomics = try_outcome!(req.guard::<&State<Atomics>>().await);
         atomics.uncached.fetch_add(1, Ordering::Relaxed);
         req.local_cache(|| {
             info!("1: populating cache!");
@@ -54,7 +54,7 @@ impl<'r> FromRequest<'r> for Guard3 {
     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, ()> {
         info!("-- 3 --");
 
-        let atomics = try_outcome!(req.guard::<State<'_, Atomics>>().await);
+        let atomics = try_outcome!(req.guard::<&State<Atomics>>().await);
         atomics.uncached.fetch_add(1, Ordering::Relaxed);
         req.local_cache_async(async {
             info!("3: populating cache!");
@@ -78,12 +78,12 @@ impl<'r> FromRequest<'r> for Guard4 {
 }
 
 #[get("/1-2")]
-fn one_two(_g1: Guard1, _g2: Guard2, state: State<'_, Atomics>) -> String {
+fn one_two(_g1: Guard1, _g2: Guard2, state: &State<Atomics>) -> String {
     format!("{:#?}", state)
 }
 
 #[get("/3-4")]
-fn three_four(_g3: Guard3, _g4: Guard4, state: State<'_, Atomics>) -> String {
+fn three_four(_g3: Guard3, _g4: Guard4, state: &State<Atomics>) -> String {
     format!("{:#?}", state)
 }
 
@@ -93,7 +93,7 @@ fn all(
     _g2: Guard2,
     _g3: Guard3,
     _g4: Guard4,
-    state: State<'_, Atomics>
+    state: &State<Atomics>
 ) -> String {
     format!("{:#?}", state)
 }

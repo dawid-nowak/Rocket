@@ -23,12 +23,10 @@ jobs:
           - { name: Contrib, flag: "--contrib" }
           - { name: Examples, flag: "--examples" }
         include:
-          - platform: { name: Linux, distro: ubuntu-latest, toolchain: stable }
+          - platform: { name: Linux, distro: ubuntu-latest, toolchain: nightly }
             test: { name: Core, flag: "--core" }
           - platform: { name: Linux, distro: ubuntu-latest, toolchain: stable }
             test: { name: Release, flag: "--release" }
-
-    continue-on-error: ${{ matrix.platform.toolchain == 'nightly' }}
 
     runs-on: ${{ matrix.platform.distro }}
 
@@ -58,7 +56,8 @@ jobs:
       - name: Install Native Dependencies (Linux)
         if: matrix.platform.name == 'Linux'
         run: |
-          sudo apt-get install -y libmariadb-client-lgpl-dev-compat libpq-dev libsqlite3-dev
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient-dev libpq-dev libsqlite3-dev
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1

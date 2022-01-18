@@ -21,7 +21,7 @@ pub struct Buffer {
 pub struct MultipartParser<'r, 'i> {
     request: &'r Request<'i>,
     buffer: &'r Buffer,
-    source: Multipart,
+    source: Multipart<'r>,
     done: bool,
 }
 
@@ -36,7 +36,10 @@ pub enum Parser<'r, 'i> {
 }
 
 impl<'r, 'i> Parser<'r, 'i> {
-    pub async fn new(req: &'r Request<'i>, data: Data) -> Outcome<Parser<'r, 'i>, Errors<'r>> {
+    pub async fn new(
+        req: &'r Request<'i>,
+        data: Data<'r>
+    ) -> Outcome<'r, Parser<'r, 'i>, Errors<'r>> {
         let parser = match req.content_type() {
             Some(c) if c.is_form() => Self::from_form(req, data).await,
             Some(c) if c.is_form_data() => Self::from_multipart(req, data).await,
@@ -49,11 +52,11 @@ impl<'r, 'i> Parser<'r, 'i> {
         }
     }
 
-    async fn from_form(req: &'r Request<'i>, data: Data) -> Result<'r, Parser<'r, 'i>> {
+    async fn from_form(req: &'r Request<'i>, data: Data<'r>) -> Result<'r, Parser<'r, 'i>> {
         let limit = req.limits().get("form").unwrap_or(Limits::FORM);
         let string = data.open(limit).into_string().await?;
         if !string.is_complete() {
-            Err((None, Some(limit.as_u64())))?
+            Err((None, Some(limit.as_u64())))?;
         }
 
         Ok(Parser::RawStr(RawStrParser {
@@ -62,7 +65,7 @@ impl<'r, 'i> Parser<'r, 'i> {
         }))
     }
 
-    async fn from_multipart(req: &'r Request<'i>, data: Data) -> Result<'r, Parser<'r, 'i>> {
+    async fn from_multipart(req: &'r Request<'i>, data: Data<'r>) -> Result<'r, Parser<'r, 'i>> {
         let boundary = req.content_type()
             .ok_or(multer::Error::NoMultipart)?
             .param("boundary")
@@ -113,6 +116,7 @@ impl<'r> Iterator for RawStrParser<'r> {
             }
         };
 
+        trace!("url-encoded field: {:?}", (name, value));
         let name_val = match (name.url_decode_lossy(), value.url_decode_lossy()) {
             (Borrowed(name), Borrowed(val)) => (name, val),
             (Borrowed(name), Owned(v)) => (name, self.buffer.push_one(v)),
@@ -182,7 +186,7 @@ impl<'r, 'i> MultipartParser<'r, 'i> {
                 content_type,
                 request: self.request,
                 name: NameView::new(name),
-                file_name: file_name.map(FileName::new),
+                file_name: file_name.map(crate::fs::FileName::new),
                 data: Data::from(field),
             })
         } else {
@@ -212,7 +216,7 @@ impl Buffer {
         }
     }
 
-    pub fn push_one<'a, S: Into<String>>(&'a self, string: S) -> &'a str {
+    pub fn push_one<S: Into<String>>(&self, string: S) -> &str {
         // SAFETY:
         //   * Aliasing: We retrieve a mutable reference to the last slot (via
         //     `push()`) and then return said reference as immutable; these

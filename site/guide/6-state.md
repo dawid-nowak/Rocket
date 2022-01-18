@@ -16,7 +16,7 @@ The process for using managed state is simple:
 
   1. Call `manage` on the `Rocket` instance corresponding to your application
      with the initial value of the state.
-  2. Add a `State<T>` type to any request handler, where `T` is the type of the
+  2. Add a `&State<T>` type to any request handler, where `T` is the type of the
      value passed into `manage`.
 
 ! note: All managed state must be thread-safe.
@@ -63,10 +63,10 @@ rocket::build()
 ### Retrieving State
 
 State that is being managed by Rocket can be retrieved via the
-[`State`](@api/rocket/struct.State.html) type: a [request
-guard](../requests/#request-guards) for managed state. To use the request
-guard, add a `State<T>` type to any request handler, where `T` is the type of
-the managed state. For example, we can retrieve and respond with the current
+[`&State`](@api/rocket/struct.State.html) type: a [request
+guard](../requests/#request-guards) for managed state. To use the request guard,
+add a `&State<T>` type to any request handler, where `T` is the type of the
+managed state. For example, we can retrieve and respond with the current
 `HitCount` in a `count` route as follows:
 
 ```rust
@@ -79,13 +79,13 @@ the managed state. For example, we can retrieve and respond with the current
 use rocket::State;
 
 #[get("/count")]
-fn count(hit_count: State<HitCount>) -> String {
+fn count(hit_count: &State<HitCount>) -> String {
     let current_count = hit_count.count.load(Ordering::Relaxed);
     format!("Number of visits: {}", current_count)
 }
 ```
 
-You can retrieve more than one `State` type in a single route as well:
+You can retrieve more than one `&State` type in a single route as well:
 
 ```rust
 # #[macro_use] extern crate rocket;
@@ -96,14 +96,17 @@ You can retrieve more than one `State` type in a single route as well:
 # use rocket::State;
 
 #[get("/state")]
-fn state(hit_count: State<HitCount>, config: State<Config>) { /* .. */ }
+fn state(hit_count: &State<HitCount>, config: &State<Config>) { /* .. */ }
 ```
 
 ! warning
 
-  If you request a `State<T>` for a `T` that is not `managed`, Rocket won't call
-  the offending route. Instead, Rocket will log an error message and return a
-  **500** error to the client.
+  If you request a `&State<T>` for a `T` that is not `managed`, Rocket will
+  refuse to start your application. This prevents what would have been an
+  unmanaged state runtime error. Unmanaged state is detected at runtime through
+  [_sentinels_](@api/rocket/trait.Sentinel.html), so there are limitations. If a
+  limitation is hit, Rocket still won't call an the offending route. Instead,
+  Rocket will log an error message and return a **500** error to the client.
 
 You can find a complete example using the `HitCount` structure in the [state
 example on GitHub](@example/state) and learn more about the [`manage`
@@ -112,35 +115,41 @@ type](@api/rocket/struct.State.html) in the API docs.
 
 ### Within Guards
 
-It can also be useful to retrieve managed state from a `FromRequest`
-implementation. To do so, simply invoke `State<T>` as a guard using the
-[`Request::guard()`] method.
+Because `State` is itself a request guard, managed state can be retrieved from
+another request guard's implementation using either [`Request::guard()`] or
+[`Rocket::state()`]. In the following code example, the `Item` request guard
+retrieves `MyConfig` from managed state using both methods:
 
 ```rust
-# #[macro_use] extern crate rocket;
-# fn main() {}
-
 use rocket::State;
 use rocket::request::{self, Request, FromRequest};
-# use std::sync::atomic::{AtomicUsize, Ordering};
+use rocket::outcome::IntoOutcome;
 
-# struct T;
-# struct HitCount { count: AtomicUsize }
-# type ErrorType = ();
+# struct MyConfig { user_val: String };
+struct Item<'r>(&'r str);
+
 #[rocket::async_trait]
-impl<'r> FromRequest<'r> for T {
-    type Error = ErrorType;
+impl<'r> FromRequest<'r> for Item<'r> {
+    type Error = ();
 
-    async fn from_request(req: &'r Request<'_>) -> request::Outcome<T, Self::Error> {
-        let hit_count_state = try_outcome!(req.guard::<State<HitCount>>().await);
-        let current_count = hit_count_state.count.load(Ordering::Relaxed);
-        /* ... */
-        # request::Outcome::Success(T)
+    async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, ()> {
+        // Using `State` as a request guard. Use `inner()` to get an `'r`.
+        let outcome = request.guard::<&State<MyConfig>>().await
+            .map(|my_config| Item(&my_config.user_val));
+
+        // Or alternatively, using `Rocket::state()`:
+        let outcome = request.rocket().state::<MyConfig>()
+            .map(|my_config| Item(&my_config.user_val))
+            .or_forward(());
+
+        outcome
     }
 }
 ```
 
+
 [`Request::guard()`]: @api/rocket/struct.Request.html#method.guard
+[`Rocket::state()`]: @api/rocket/struct.Rocket.html#method.state
 
 ## Request-Local State
 
@@ -225,7 +234,7 @@ three simple steps:
 
 Presently, Rocket provides built-in support for the following databases:
 
-<!-- Note: Keep this table in sync with contrib/lib/src/databases.rs -->
+<!-- Note: Keep this table in sync with contrib/sync_db_pools/src/lib.rs -->
 | Kind     | Driver                | Version   | `Poolable` Type                | Feature                |
 |----------|-----------------------|-----------|--------------------------------|------------------------|
 | MySQL    | [Diesel]              | `1`       | [`diesel::MysqlConnection`]    | `diesel_mysql_pool`    |
@@ -257,8 +266,8 @@ identified in the "Feature" column. For instance, for Diesel-based SQLite
 databases, you'd write in `Cargo.toml`:
 
 ```toml
-[dependencies.rocket_contrib]
-version = "0.5.0-dev"
+[dependencies.rocket_sync_db_pools]
+version = "0.1.0-rc.1"
 default-features = false
 features = ["diesel_sqlite_pool"]
 ```
@@ -274,18 +283,17 @@ sqlite_logs = { url = "/path/to/database.sqlite" }
 In your application's source code, create a unit-like struct with one internal
 type. This type should be the type listed in the "`Poolable` Type" column. Then
 decorate the type with the `#[database]` attribute, providing the name of the
-database that you configured in the previous step as the only parameter.
-You will need to either add `#[macro_use] extern crate rocket_contrib` to the
-crate root or have a `use rocket_contrib::database` in scope, otherwise the
-`database` attribute will not be available.
-Finally, attach the fairing returned by `YourType::fairing()`, which was
-generated by the `#[database]` attribute:
+database that you configured in the previous step as the only parameter. You
+will need to either add `#[macro_use] extern crate rocket_sync_db_pools` to the
+crate root or have a `use rocket_sync_db_pools::database` in scope, otherwise
+the `database` attribute will not be available. Finally, attach the fairing
+returned by `YourType::fairing()`, which was generated by the `#[database]`
+attribute:
 
 ```rust
 # #[macro_use] extern crate rocket;
-#[macro_use] extern crate rocket_contrib;
 
-use rocket_contrib::databases::diesel;
+use rocket_sync_db_pools::{diesel, database};
 
 #[database("sqlite_logs")]
 struct LogsDbConn(diesel::SqliteConnection);
@@ -301,10 +309,9 @@ request guard. The database can be accessed by calling the `run` method:
 
 ```rust
 # #[macro_use] extern crate rocket;
-# #[macro_use] extern crate rocket_contrib;
 # fn main() {}
 
-# use rocket_contrib::databases::diesel;
+# use rocket_sync_db_pools::{diesel, database};
 
 # #[database("sqlite_logs")]
 # struct LogsDbConn(diesel::SqliteConnection);
@@ -332,9 +339,9 @@ async fn get_logs(conn: LogsDbConn, id: usize) -> Logs {
   The database engines supported by `#[database]` are *synchronous*. Normally,
   using such a database would block the thread of execution. To prevent this,
   the `run()` function automatically uses a thread pool so that database access
-  does not interfere with other in-flight requests. See [Cooperative
-  Multitasking](../overview/#cooperative-multitasking) for more information on
-  why this is necessary.
+  does not interfere with other in-flight requests. See
+  [Multitasking](../overview/#multitasking) for more information on why this is
+  necessary.
 
 If your application uses features of a database engine that are not available
 by default, for example support for `chrono` or `uuid`, you may enable those
@@ -345,11 +352,11 @@ features by adding them in `Cargo.toml` like so:
 postgres = { version = "0.15", features = ["with-chrono"] }
 ```
 
-For more on Rocket's built-in database support, see the
-[`rocket_contrib::databases`] module documentation. For examples of CRUD-like
-"blog" JSON APIs backed by a SQLite database driven by each of `sqlx`, `diesel`,
-and `rusqlite` with migrations run automatically for the former two drivers and
-`contrib` database support use for the latter two drivers, see the [databases
+For more on Rocket's sanctioned database support, see the
+[`rocket_sync_db_pools`] library documentation. For examples of CRUD-like "blog"
+JSON APIs backed by a SQLite database driven by each of `sqlx`, `diesel`, and
+`rusqlite` with migrations run automatically for the former two drivers and
+Rocket's database support use for the latter two drivers, see the [databases
 example](@example/databases).
 
-[`rocket_contrib::databases`]: @api/rocket_contrib/databases/index.html
+[`rocket_sync_db_pools`]: @api/rocket_sync_db_pools/index.html

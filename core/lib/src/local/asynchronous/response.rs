@@ -40,7 +40,7 @@ use crate::{Request, Response};
 ///
 /// // Check metadata validity.
 /// assert_eq!(response.status(), Status::Ok);
-/// assert_eq!(response.body().unwrap().known_size(), Some(13));
+/// assert_eq!(response.body().preset_size(), Some(13));
 ///
 /// // Read 10 bytes of the body. Note: in reality, we'd use `into_string()`.
 /// let mut buffer = [0; 10];
@@ -107,12 +107,82 @@ impl LocalResponse<'_> {
         &self.cookies
     }
 
-    pub(crate) async fn _into_string(mut self) -> Option<String> {
-        self.response.body_string().await
+    pub(crate) async fn _into_string(mut self) -> io::Result<String> {
+        self.response.body_mut().to_string().await
     }
 
-    pub(crate) async fn _into_bytes(mut self) -> Option<Vec<u8>> {
-        self.response.body_bytes().await
+    pub(crate) async fn _into_bytes(mut self) -> io::Result<Vec<u8>> {
+        self.response.body_mut().to_bytes().await
+    }
+
+    #[cfg(feature = "json")]
+    async fn _into_json<T: Send + 'static>(self) -> Option<T>
+        where T: serde::de::DeserializeOwned
+    {
+        self.blocking_read(|r| serde_json::from_reader(r)).await?.ok()
+    }
+
+    #[cfg(feature = "msgpack")]
+    async fn _into_msgpack<T: Send + 'static>(self) -> Option<T>
+        where T: serde::de::DeserializeOwned
+    {
+        self.blocking_read(|r| rmp_serde::from_read(r)).await?.ok()
+    }
+
+    #[cfg(any(feature = "json", feature = "msgpack"))]
+    async fn blocking_read<T, F>(mut self, f: F) -> Option<T>
+        where T: Send + 'static,
+              F: FnOnce(&mut dyn io::Read) -> T + Send + 'static
+    {
+        use tokio::sync::mpsc;
+        use tokio::io::AsyncReadExt;
+
+        struct ChanReader {
+            last: Option<io::Cursor<Vec<u8>>>,
+            rx: mpsc::Receiver<io::Result<Vec<u8>>>,
+        }
+
+        impl std::io::Read for ChanReader {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                loop {
+                    if let Some(ref mut cursor) = self.last {
+                        if cursor.position() < cursor.get_ref().len() as u64 {
+                            return std::io::Read::read(cursor, buf);
+                        }
+                    }
+
+                    if let Some(buf) = self.rx.blocking_recv() {
+                        self.last = Some(io::Cursor::new(buf?));
+                    } else {
+                        return Ok(0);
+                    }
+                }
+            }
+        }
+
+        let (tx, rx) = mpsc::channel(2);
+        let reader = tokio::task::spawn_blocking(move || {
+            let mut reader = ChanReader { last: None, rx };
+            f(&mut reader)
+        });
+
+        loop {
+            // TODO: Try to fill as much as the buffer before send it off?
+            let mut buf = Vec::with_capacity(1024);
+            match self.read_buf(&mut buf).await {
+                Ok(n) if n == 0 => break,
+                Ok(_) => tx.send(Ok(buf)).await.ok()?,
+                Err(e) => {
+                    tx.send(Err(e)).await.ok()?;
+                    break;
+                }
+            }
+        }
+
+        // NOTE: We _must_ drop tx now to prevent a deadlock!
+        drop(tx);
+
+        reader.await.ok()
     }
 
     // Generates the public API methods, which call the private methods above.
@@ -126,12 +196,7 @@ impl AsyncRead for LocalResponse<'_> {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        let body = match self.response.body_mut() {
-            Some(body) => body,
-            _ => return Poll::Ready(Ok(()))
-        };
-
-        Pin::new(body.as_reader()).poll_read(cx, buf)
+        Pin::new(self.response.body_mut()).poll_read(cx, buf)
     }
 }
 

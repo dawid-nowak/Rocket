@@ -70,6 +70,7 @@ pub struct Error {
 /// encountered an error; these are represented by the `Collision` and
 /// `FailedFairing` variants, respectively.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ErrorKind {
     /// Binding to the provided address/port failed.
     Bind(io::Error),
@@ -84,6 +85,8 @@ pub enum ErrorKind {
     Collisions(crate::router::Collisions),
     /// Launch fairing(s) failed.
     FailedFairings(Vec<crate::fairing::Info>),
+    /// Sentinels requested abort.
+    SentinelAborts(Vec<crate::sentinel::Sentry>),
     /// The configuration profile is not debug but not secret key is configured.
     InsecureSecretKey(Profile),
 }
@@ -142,10 +145,11 @@ impl fmt::Display for ErrorKind {
             ErrorKind::Bind(e) => write!(f, "binding failed: {}", e),
             ErrorKind::Io(e) => write!(f, "I/O error: {}", e),
             ErrorKind::Collisions(_) => "collisions detected".fmt(f),
-            ErrorKind::FailedFairings(_) => "a launch fairing failed".fmt(f),
+            ErrorKind::FailedFairings(_) => "launch fairing(s) failed".fmt(f),
             ErrorKind::Runtime(e) => write!(f, "runtime error: {}", e),
             ErrorKind::InsecureSecretKey(_) => "insecure secret key config".fmt(f),
             ErrorKind::Config(_) => "failed to extract configuration".fmt(f),
+            ErrorKind::SentinelAborts(_) => "sentinel(s) aborted".fmt(f),
         }
     }
 }
@@ -168,7 +172,8 @@ impl fmt::Display for Error {
 
 impl Drop for Error {
     fn drop(&mut self) {
-        if self.was_handled() {
+        // Don't panic if the message has been seen. Don't double-panic.
+        if self.was_handled() || std::thread::panicking() {
             return
         }
 
@@ -226,6 +231,16 @@ impl Drop for Error {
             ErrorKind::Config(ref error) => {
                 crate::config::pretty_print_error(error.clone());
                 panic!("aborting due to invalid configuration")
+            }
+            ErrorKind::SentinelAborts(ref failures) => {
+                error!("Rocket failed to launch due to aborting sentinels:");
+                for sentry in failures {
+                    let name = Paint::default(sentry.type_name).bold();
+                    let (file, line, col) = sentry.location;
+                    info!("{} ({}:{}:{})", name, file, line, col);
+                }
+
+                panic!("aborting due to sentinel-triggered abort(s)");
             }
         }
     }

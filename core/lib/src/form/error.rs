@@ -31,7 +31,7 @@ use crate::data::ByteUnit;
 /// let errors_for_foo = errors.iter().filter(|e| e.is_for("foo.bar"));
 /// ```
 ///
-/// ## Contructing
+/// ## Constructing
 ///
 /// An `Errors` can be constructed from anything that an `Error` can be
 /// constructed from. This includes [`Error`], [`ErrorKind`], and all of the
@@ -59,30 +59,37 @@ pub struct Errors<'v>(Vec<Error<'v>>);
 
 /// A form error, potentially tied to a specific form field.
 ///
-/// An `Error` is returned by [`FromForm`], [`FromFormField`], and
-/// [`validate`](crate::form::validate) procedures, typically as a collection of
-/// [`Errors`]. It potentially identifies a specific field that triggered the
-/// error via [`Error::name`] and the field's value via [`Error::value`].
+/// An `Error` is returned by [`FromForm`], [`FromFormField`], and [`validate`]
+/// procedures, typically as a collection of [`Errors`]. It potentially
+/// identifies a specific field that triggered the error via [`Error::name`] and
+/// the field's value via [`Error::value`].
 ///
 /// An `Error` can occur because of a field's value that failed to parse or
 /// because other parts of a field or form were malformed; the [`Error::entity`]
 /// identifies the part of the form that resulted in the error.
 ///
-/// # Contructing
+/// [`FromForm`]: crate::form::FromForm
+/// [`FromFormField`]: crate::form::FromFormField
+/// [`validate`]: crate::form::validate
 ///
-/// An `Error` can be constructed from anything that an [`ErrorKind`] can be
-/// constructed from. See [`ErrorKind`](ErrorKind#constructing).
+/// # Constructing
+///
+/// An `Error` can be constructed via [`Error::validation()`],
+/// [`Error::custom()`], or anything that an [`ErrorKind`] can be constructed
+/// from. See [`ErrorKind`](ErrorKind#constructing).
 ///
 /// ```rust
 /// use rocket::form::Error;
 ///
-/// fn at_most_10() -> Result<usize, Error<'static>> {
+/// fn at_most_10_not_even() -> Result<usize, Error<'static>> {
 ///     // Using `From<PartIntError> => ErrorKind::Int`.
 ///     let i: usize = "foo".parse()?;
 ///
 ///     if i > 10 {
 ///         // `From<(Option<isize>, Option<isize>)> => ErrorKind::OutOfRange`
 ///         return Err((None, Some(10isize)).into());
+///     } else if i % 2 == 0 {
+///         return Err(Error::validation("integer cannot be even"));
 ///     }
 ///
 ///     Ok(i)
@@ -96,7 +103,7 @@ pub struct Errors<'v>(Vec<Error<'v>>);
 /// automatically.
 ///
 /// When constructed from an `ErrorKind`, the entity is set to
-/// [`Entity::default_for()`] by default. Ocassionally, the error's `entity` may
+/// [`Entity::default_for()`] by default. Occasionally, the error's `entity` may
 /// need to be set manually. Return what would be useful to the end-consumer.
 ///
 /// # Matching Errors to Fields
@@ -129,13 +136,13 @@ pub struct Error<'v> {
     pub name: Option<NameBuf<'v>>,
     /// The field's value, if it is known.
     pub value: Option<Cow<'v, str>>,
-    /// The kind of error that occured.
+    /// The kind of error that occurred.
     pub kind: ErrorKind<'v>,
     /// The entitiy that caused the error.
     pub entity: Entity,
 }
 
-/// The kind of form error that occured.
+/// The kind of form error that occurred.
 ///
 /// ## Constructing
 ///
@@ -154,6 +161,7 @@ pub struct Error<'v> {
 ///   * [`io::Error`] => [`ErrorKind::Io`]
 ///   * `Box<dyn std::error::Error + Send` => [`ErrorKind::Custom`]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ErrorKind<'v> {
     /// The value's length, in bytes, was outside the range `[min, max]`.
     InvalidLength {
@@ -373,7 +381,7 @@ impl crate::http::ext::IntoOwned for Errors<'_> {
 
 impl fmt::Display for Errors<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} errors:", self.len())?;
+        write!(f, "{} error(s):", self.len())?;
         for error in self.iter() {
             write!(f, "\n{}", error)?;
         }
@@ -797,17 +805,25 @@ impl fmt::Display for ErrorKind<'_> {
         match self {
             ErrorKind::InvalidLength { min, max } => {
                 match (min, max) {
-                    (None, None) => write!(f, "unexpected or incomplete")?,
-                    (None, Some(k)) => write!(f, "length cannot exceed {}", k)?,
-                    (Some(1), None) => write!(f, "value cannot be empty")?,
-                    (Some(k), None) => write!(f, "length must be at least {}", k)?,
-                    (Some(i), Some(j)) => write!(f, "length must be between {} and {}", i, j)?,
+                    (None, None) => write!(f, "invalid length: incomplete")?,
+                    (None, Some(k)) if *k < 1024 => write!(f, "length cannot exceed {}", k)?,
+                    (None, Some(k)) => write!(f, "size must not exceed {}", ByteUnit::from(*k))?,
+                    (Some(1), None) => write!(f, "cannot be empty")?,
+                    (Some(k), None) if *k < 1024 => write!(f, "expected at least {}", k)?,
+                    (Some(k), None) => write!(f, "size must be at least {}", ByteUnit::from(*k))?,
+                    (Some(i), Some(j)) if *i < 1024 && *j < 1024 => {
+                        write!(f, "length must be between {} and {}", i, j)?;
+                    }
+                    (Some(i), Some(j)) => {
+                        let (i, j) = (ByteUnit::from(*i), ByteUnit::from(*j));
+                        write!(f, "size must be between {} and {}", i, j)?;
+                    }
                 }
             }
             ErrorKind::InvalidChoice { choices } => {
-                match choices.as_ref() {
-                    &[] => write!(f, "invalid choice")?,
-                    &[ref choice] => write!(f, "expected {}", choice)?,
+                match *choices.as_ref() {
+                    [] => write!(f, "invalid choice")?,
+                    [ref choice] => write!(f, "expected {}", choice)?,
                     _ => {
                         write!(f, "expected one of ")?;
                         for (i, choice) in choices.iter().enumerate() {

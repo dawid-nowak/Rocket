@@ -5,7 +5,8 @@ use crate::{Request, Route};
 use crate::outcome::{self, IntoOutcome};
 use crate::outcome::Outcome::*;
 
-use crate::http::{Status, ContentType, Accept, Method, CookieJar, uri::Origin};
+use crate::http::{Status, ContentType, Accept, Method, CookieJar};
+use crate::http::uri::{Host, Origin};
 
 /// Type alias for the `Outcome` of a `FromRequest` conversion.
 pub type Outcome<S, E> = outcome::Outcome<S, (Status, E), ()>;
@@ -129,6 +130,10 @@ impl<S, E> IntoOutcome<S, (Status, E), ()> for Result<S, E> {
 ///
 ///     _This implementation always returns successfully._
 ///
+///   * **&Host**
+///
+///     Extracts the [`Host`] from the incoming request.
+///
 ///   * **&Route**
 ///
 ///     Extracts the [`Route`] from the request if one is available. If a route
@@ -247,7 +252,7 @@ impl<S, E> IntoOutcome<S, (Status, E), ()> for Result<S, E> {
 /// ```rust
 /// # #[macro_use] extern crate rocket;
 /// # #[cfg(feature = "secrets")] mod wrapper {
-/// # use rocket::outcome::IntoOutcome;
+/// # use rocket::outcome::{IntoOutcome, try_outcome};
 /// # use rocket::request::{self, Outcome, FromRequest, Request};
 /// # struct User { id: String, is_admin: bool }
 /// # struct Database;
@@ -311,7 +316,7 @@ impl<S, E> IntoOutcome<S, (Status, E), ()> for Result<S, E> {
 /// ```rust
 /// # #[macro_use] extern crate rocket;
 /// # #[cfg(feature = "secrets")] mod wrapper {
-/// # use rocket::outcome::IntoOutcome;
+/// # use rocket::outcome::{IntoOutcome, try_outcome};
 /// # use rocket::request::{self, Outcome, FromRequest, Request};
 /// # struct User { id: String, is_admin: bool }
 /// # struct Database;
@@ -368,7 +373,7 @@ impl<S, E> IntoOutcome<S, (Status, E), ()> for Result<S, E> {
 /// Notice that these request guards provide access to *borrowed* data (`&'a
 /// User` and `Admin<'a>`) as the data is now owned by the request's cache.
 ///
-/// [request-local state]: https://rocket.rs/master/guide/state/#request-local-state
+/// [request-local state]: https://rocket.rs/v0.5-rc/guide/state/#request-local-state
 #[crate::async_trait]
 pub trait FromRequest<'r>: Sized {
     /// The associated error to be returned if derivation fails.
@@ -398,6 +403,18 @@ impl<'r> FromRequest<'r> for &'r Origin<'r> {
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         Success(request.uri())
+    }
+}
+
+#[crate::async_trait]
+impl<'r> FromRequest<'r> for &'r Host<'r> {
+    type Error = std::convert::Infallible;
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        match request.host() {
+            Some(host) => Success(host),
+            None => Forward(())
+        }
     }
 }
 
