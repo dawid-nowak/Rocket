@@ -3,6 +3,7 @@ use rocket::http::Status;
 use rocket::request::{self, FromRequest};
 
 use crate::context::ContextManager;
+use rocket::trace::{info,error,error_span};
 
 /// Request guard for dynamically querying template metadata.
 ///
@@ -85,8 +86,8 @@ impl Sentinel for Metadata<'_> {
             let md = rocket::yansi::Paint::default("Metadata").bold();
             let fairing = rocket::yansi::Paint::default("Template::fairing()").bold();
             error!("requested `{}` guard without attaching `{}`.", md, fairing);
-            info_!("To use or query templates, you must attach `{}`.", fairing);
-            info_!("See the `Template` documentation for more information.");
+            info!("To use or query templates, you must attach `{}`.", fairing);
+            info!("See the `Template` documentation for more information.");
             return true;
         }
 

@@ -31,6 +31,8 @@ impl Route {
     }
 }
 
+
+
 fn query_decls(route: &Route) -> Option<TokenStream> {
     use devise::ext::{Split2, Split6};
 
@@ -102,14 +104,14 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
                 };
             )*
 
-        if !_e.is_empty() {
-            #_trace::warn_span!("mismatch_query_string",
-                "query string failed to match declared route"
-            ).in_scope(|| {
-                for _err in _e { #_trace::warn!("{}", _err); }
-            });
-            return #Outcome::Forward(#__data);
-        }
+            if !__e.is_empty() {
+                #_trace::warn_span!("mismatch_query_string",
+                    "query string failed to match declared route"
+                ).in_scope(|| {
+                    for _err in __e { #_trace::warn!("{}", _err); }
+                });
+                return #Outcome::Forward(#__data);
+            }
 
             (#(#ident.unwrap()),*)
         };
@@ -119,18 +121,16 @@ fn query_decls(route: &Route) -> Option<TokenStream> {
 fn request_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
     define_spanned_export!(ty.span() =>
-        __req, __data, _request, _log, FromRequest, Outcome
+        __req, __data, _request, FromRequest, Outcome
     );
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromRequest>::from_request(#__req).await {
             #Outcome::Success(__v) => __v,
-            #Outcome::Forward(_) => {
-                #_log::warn_!("Request guard `{}` is forwarding.", stringify!(#ty));
+            #Outcome::Forward(_) => {                
                 return #Outcome::Forward(#__data);
             },
-            #Outcome::Failure((__c, __e)) => {
-                #_log::warn_!("Request guard `{}` failed: {:?}.", stringify!(#ty), __e);
+            #Outcome::Failure((__c, __e)) => {                
                 return #Outcome::Failure(__c);
             }
         };
@@ -181,17 +181,15 @@ fn param_guard_decl(guard: &Guard) -> TokenStream {
 
 fn data_guard_decl(guard: &Guard) -> TokenStream {
     let (ident, ty) = (guard.fn_ident.rocketized(), &guard.ty);
-    define_spanned_export!(ty.span() => _log, __req, __data, FromData, Outcome);
+    define_spanned_export!(ty.span() =>  __req, __data, FromData, Outcome);
 
     quote_spanned! { ty.span() =>
         let #ident: #ty = match <#ty as #FromData>::from_data(#__req, #__data).await {
             #Outcome::Success(__d) => __d,
-            #Outcome::Forward(__d) => {
-                #_log::warn_!("Data guard `{}` is forwarding.", stringify!(#ty));
+            #Outcome::Forward(__d) => {                
                 return #Outcome::Forward(__d);
             }
-            #Outcome::Failure((__c, __e)) => {
-                #_log::warn_!("Data guard `{}` failed: {:?}.", stringify!(#ty), __e);
+            #Outcome::Failure((__c, __e)) => {                
                 return #Outcome::Failure(__c);
             }
         };
@@ -312,6 +310,8 @@ fn sentinels_expr(route: &Route) -> TokenStream {
     quote!(::std::vec![#(#sentinel),*])
 }
 
+
+
 fn codegen_route(route: Route) -> Result<TokenStream> {
     use crate::exports::*;
 
@@ -330,8 +330,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
     let internal_uri_macro = internal_uri_macro_decl(&route);
     let responder_outcome = responder_outcome_expr(&route);
 
-    let method = route.attr.method;
-    let uri = route.attr.uri.to_string();
+    let method = route.attr.method;    
     let path = route.attr.uri.to_string();
     let rank = Optional(route.attr.rank);
     let format = Optional(route.attr.format.as_ref());
@@ -339,10 +338,10 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
     Ok(quote! {
         #handler_fn
 
-        // #[doc(hidden)]
-        // #[allow(non_camel_case_types)]
-        // /// Rocket code generated proxy structure.
-        // #vis struct #handler_fn_name {  }
+        #[doc(hidden)]
+        #[allow(non_camel_case_types)]
+        /// Rocket code generated proxy structure.
+        #vis struct #handler_fn_name {  }
 
         /// Rocket code generated proxy static conversion implementations.
         impl #handler_fn_name {
@@ -363,9 +362,9 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                     }
                     .instrument(#_trace::info_span!(
                         stringify!(#handler_fn_name),
-                        method = %#method,     
-                        path = #path,                   
-                        "Route: {}", stringify!(#handler_fn_name)
+                        method = %#method, 
+                        path = #path,                        
+                        "Route: {}", stringify!(#handler_fn_name)                                                    
                     ))
                 )
                 }
@@ -373,7 +372,7 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
                 #_route::StaticInfo {
                     name: stringify!(#handler_fn_name),
                     method: #method,
-                    uri: #uri,
+                    uri: #path,
                     handler: monomorphized_function,
                     format: #format,
                     rank: #rank,
@@ -391,6 +390,8 @@ fn codegen_route(route: Route) -> Result<TokenStream> {
         #internal_uri_macro
     })
 }
+
+
 
 fn complete_route(args: TokenStream, input: TokenStream) -> Result<TokenStream> {
     let function: syn::ItemFn = syn::parse2(input)
@@ -446,3 +447,4 @@ pub fn route_attribute<M: Into<Option<crate::http::Method>>>(
 
     result.unwrap_or_else(|diag| diag.emit_as_item_tokens())
 }
+

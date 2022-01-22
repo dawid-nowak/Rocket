@@ -1,13 +1,15 @@
+
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-use rocket::{error, info_, Build, Ignite, Phase, Rocket, Sentinel};
+use rocket::{Build, Ignite, Phase, Rocket, Sentinel};
 use rocket::fairing::{self, Fairing, Info, Kind};
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::http::Status;
 
 use rocket::yansi::Paint;
 use rocket::figment::providers::Serialized;
+use rocket::trace::{error,info};
 
 use crate::Pool;
 
@@ -125,7 +127,7 @@ pub trait Database: From<Self::Pool> + DerefMut<Target = Self::Pool> + Send + Sy
         let dbtype = std::any::type_name::<Self>();
         let fairing = Paint::default(format!("{}::init()", dbtype)).bold();
         error!("Attempted to fetch unattached database `{}`.", Paint::default(dbtype).bold());
-        info_!("`{}` fairing must be attached prior to using this database.", fairing);
+        info!("`{}` fairing must be attached prior to using this database.", fairing);
         None
     }
 }

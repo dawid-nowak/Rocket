@@ -133,8 +133,6 @@
 #![doc(html_favicon_url = "https://rocket.rs/images/favicon.ico")]
 #![doc(html_logo_url = "https://rocket.rs/images/logo-boxed.png")]
 
-#[macro_use] extern crate rocket;
-
 #[cfg(not(any(feature = "tera", feature = "handlebars")))]
 compile_error!("at least one of \"tera\" or \"handlebars\" features must be enabled");
 
@@ -178,6 +176,7 @@ use rocket::response::{self, Responder};
 use rocket::http::{ContentType, Status};
 use rocket::figment::{value::Value, error::Error};
 use rocket::serde::Serialize;
+use rocket::trace::{info,error,warn_span,error_span};
 
 const DEFAULT_TEMPLATE_DIR: &str = "templates";
 
@@ -403,11 +402,11 @@ impl Template {
             Status::InternalServerError
         })?;
 
-        let value = self.value.ok_or_else(|| {
-            error!("The provided template context failed to serialize.");
+        let value = self.value.map_err(|e| {
+            error!("Template context failed to serialize: {}.", e);
             Status::InternalServerError
         })?;
-
+        
         let string = ctxt.engines.render(name, &info, value).ok_or_else(|| {
             error!(template = %name, "Template failed to render.");
             Status::InternalServerError
@@ -444,8 +443,8 @@ impl Sentinel for Template {
             let template = rocket::yansi::Paint::default("Template").bold();
             let fairing = rocket::yansi::Paint::default("Template::fairing()").bold();
             error!("returning `{}` responder without attaching `{}`.", template, fairing);
-            info_!("To use or query templates, you must attach `{}`.", fairing);
-            info_!("See the `Template` documentation for more information.");
+            info!("To use or query templates, you must attach `{}`.", fairing);
+            info!("See the `Template` documentation for more information.");
             return true;
         }
 

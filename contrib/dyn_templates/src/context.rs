@@ -6,6 +6,7 @@ use crate::{Engines, TemplateInfo};
 
 use rocket::http::ContentType;
 use normpath::PathExt;
+use rocket::trace::{info,error,warn_span,warn};
 
 pub(crate) type Callback =
     Box<dyn Fn(&mut Engines) -> Result<(), Box<dyn Error>> + Send + Sync + 'static>;
@@ -65,8 +66,8 @@ impl Context {
 
         let mut engines = Engines::init(&templates)?;
         if let Err(e) = callback(&mut engines) {
-            error_!("Template customization callback failed.");
-            error_!("{}", e);
+            error!("Template customization callback failed.");
+            error!("{}", e);
             return None;
         }
 
@@ -119,6 +120,7 @@ mod manager {
     use notify::{raw_watcher, RawEvent, RecommendedWatcher, RecursiveMode, Watcher};
 
     use super::{Callback, Context};
+    use rocket::trace::{info,warn,debug};
 
     /// Wraps a Context. With `cfg(debug_assertions)` active, this structure
     /// additionally provides a method to reload the context at runtime.
@@ -141,8 +143,8 @@ mod manager {
                 Ok(watcher) => Some((watcher, Mutex::new(rx))),
                 Err(e) => {
                     warn!("Failed to enable live template reloading: {}", e);
-                    debug_!("Reload error: {:?}", e);
-                    warn_!("Live template reloading is unavailable.");
+                    debug!("Reload error: {:?}", e);
+                    warn!("Live template reloading is unavailable.");
                     None
                 }
             };
@@ -171,13 +173,13 @@ mod manager {
                 .map(|(_, rx)| rx.lock().expect("fsevents lock").try_iter().count() > 0);
 
             if let Some(true) = templates_changes {
-                info_!("Change detected: reloading templates.");
+                info!("Change detected: reloading templates.");
                 let root = self.context().root.clone();
                 if let Some(new_ctxt) = Context::initialize(&root, &callback) {
                     *self.context_mut() = new_ctxt;
                 } else {
-                    warn_!("An error occurred while reloading templates.");
-                    warn_!("Existing templates will remain active.");
+                    warn!("An error occurred while reloading templates.");
+                    warn!("Existing templates will remain active.");
                 };
             }
         }

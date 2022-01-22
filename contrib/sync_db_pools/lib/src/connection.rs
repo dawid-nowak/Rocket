@@ -4,12 +4,12 @@ use std::sync::Arc;
 use rocket::{Phase, Rocket, Ignite, Sentinel};
 use rocket::fairing::{AdHoc, Fairing};
 use rocket::request::{Request, Outcome, FromRequest};
-use rocket::trace::error;
 use rocket::outcome::IntoOutcome;
 use rocket::http::Status;
 
 use rocket::tokio::sync::{OwnedSemaphorePermit, Semaphore, Mutex};
 use rocket::tokio::time::timeout;
+use rocket::trace::{info,error};
 
 use crate::{Config, Poolable, Error};
 
@@ -225,7 +225,7 @@ impl<K: 'static, C: Poolable> Sentinel for Connection<K, C> {
             let conn = Paint::default(std::any::type_name::<K>()).bold();
             let fairing = Paint::default(format!("{}::fairing()", conn)).wrap().bold();
             error!("requesting `{}` DB connection without attaching `{}`.", conn, fairing);
-            info_!("Attach `{}` to use database connection pooling.", fairing);
+            info!("Attach `{}` to use database connection pooling.", fairing);
             return true;
         }
 

@@ -3,6 +3,7 @@ use crate::context::{Callback, ContextManager};
 
 use rocket::{Rocket, Build, Orbit};
 use rocket::fairing::{self, Fairing, Info, Kind};
+use rocket::trace::{info,error};
 
 /// The TemplateFairing initializes the template system on attach, running
 /// custom_callback after templates have been loaded. In debug mode, the fairing
@@ -48,20 +49,20 @@ impl Fairing for TemplateFairing {
         if let Some(ctxt) = Context::initialize(&path, &self.callback) {
             Ok(rocket.manage(ContextManager::new(ctxt)))
         } else {
-            error_!("Template initialization failed. Aborting launch.");
+            error!("Template initialization failed. Aborting launch.");
             Err(rocket)
         }
     }
 
     async fn on_liftoff(&self, rocket: &Rocket<Orbit>) {
-        use rocket::{figment::Source, log::PaintExt, yansi::Paint};
+        use rocket::{figment::Source, trace::PaintExt, yansi::Paint};
 
         let cm = rocket.state::<ContextManager>()
             .expect("Template ContextManager registered in on_ignite");
 
         info!("{}{}:", Paint::emoji("📐 "), Paint::magenta("Templating"));
-        info_!("directory: {}", Paint::white(Source::from(&*cm.context().root)));
-        info_!("engines: {:?}", Paint::white(Engines::ENABLED_EXTENSIONS));
+        info!("directory: {}", Paint::white(Source::from(&*cm.context().root)));
+        info!("engines: {:?}", Paint::white(Engines::ENABLED_EXTENSIONS));
     }
 
     #[cfg(debug_assertions)]

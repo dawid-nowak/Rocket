@@ -2,10 +2,12 @@ use std::path::Path;
 use std::error::Error;
 
 use rocket::serde::Serialize;
+use rocket::trace::{info_span,error,error_span};
 
 use crate::engine::Engine;
 
 pub use crate::tera::{Context, Tera};
+
 
 impl Engine for Tera {
     const EXT: &'static str = "tera";
@@ -21,7 +23,7 @@ impl Engine for Tera {
         let files = templates.map(|(name, path)| (path, Some(name)));
 
         // Finally try to tell Tera about all of the templates.
-        if let Err(e) = tera.add_template_files(tera_templates) {
+        if let Err(e) = tera.add_template_files(files) {
             let span = error_span!("Failed to initialize Tera templating.");
             let _e = span.enter();
             let mut error = Some(&e as &dyn Error);
