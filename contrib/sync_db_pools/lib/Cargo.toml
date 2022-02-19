@@ -22,7 +22,10 @@ r2d2 = "0.8"
 tokio = { version = "1.6.1", features = ["rt", "rt-multi-thread"] }
 serde = { version = "1.0", features = ["derive"] }
 
-diesel = { version = "1.0", default-features = false, optional = true }
+#diesel = { version="1", features = ["postgres","uuid"] }
+diesel = { git="https://github.com/dawid-nowak/diesel", branch="master", features = ["postgres","uuid"] }
+#diesel = { path = "../../../../diesel/diesel", features = ["postgres","uuid"] }
+
 
 postgres = { version = "0.19", optional = true }
 r2d2_postgres = { version = "0.18", optional = true }

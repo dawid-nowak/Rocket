@@ -189,7 +189,7 @@ mod sqlx {
     use sqlx::ConnectOptions;
     use super::{Duration, Error, Config, Figment};
     use rocket::config::LogLevel;
-
+    
     type Options<D> = <<D as sqlx::Database>::Connection as sqlx::Connection>::Options;
 
     // Provide specialized configuration for particular databases.

@@ -1,12 +1,12 @@
-use state::Container;
 use figment::Figment;
+use state::Container;
 
-use crate::{Catcher, Config, Rocket, Route, Shutdown};
-use crate::router::Router;
 use crate::fairing::Fairings;
+use crate::router::Router;
+use crate::{Catcher, Config, Rocket, Route, Shutdown};
 
 mod private {
-    pub trait Sealed {  }
+    pub trait Sealed {}
 }
 
 #[doc(hidden)]

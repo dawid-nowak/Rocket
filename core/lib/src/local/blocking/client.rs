@@ -1,10 +1,13 @@
-use std::fmt;
 use std::cell::RefCell;
 use std::convert::TryInto;
+use std::fmt;
 
-use crate::{Rocket, Phase, Orbit, Error};
-use crate::local::{asynchronous, blocking::{LocalRequest, LocalResponse}};
-use crate::http::{Method, uri::Origin};
+use crate::http::{uri::Origin, Method};
+use crate::local::{
+    asynchronous,
+    blocking::{LocalRequest, LocalResponse},
+};
+use crate::{Error, Orbit, Phase, Rocket};
 
 /// A `blocking` client to construct and dispatch local requests.
 ///
@@ -41,13 +44,17 @@ impl Client {
 
         // Initialize the Rocket instance
         let inner = Some(runtime.block_on(asynchronous::Client::_new(rocket, tracked))?);
-        Ok(Self { inner, runtime: RefCell::new(runtime) })
+        Ok(Self {
+            inner,
+            runtime: RefCell::new(runtime),
+        })
     }
 
     // WARNING: This is unstable! Do not use this method outside of Rocket!
     #[doc(hidden)]
     pub fn _test<T, F>(f: F) -> T
-        where F: FnOnce(&Self, LocalRequest<'_>, LocalResponse<'_>) -> T + Send
+    where
+        F: FnOnce(&Self, LocalRequest<'_>, LocalResponse<'_>) -> T + Send,
     {
         let client = Client::debug(crate::build()).unwrap();
         let request = client.get("/");
@@ -57,12 +64,15 @@ impl Client {
 
     #[inline(always)]
     pub(crate) fn inner(&self) -> &asynchronous::Client {
-        self.inner.as_ref().expect("internal invariant broken: self.inner is Some")
+        self.inner
+            .as_ref()
+            .expect("internal invariant broken: self.inner is Some")
     }
 
     #[inline(always)]
     pub(crate) fn block_on<F, R>(&self, fut: F) -> R
-        where F: std::future::Future<Output=R>,
+    where
+        F: std::future::Future<Output = R>,
     {
         self.runtime.borrow_mut().block_on(fut)
     }
@@ -74,14 +84,16 @@ impl Client {
 
     #[inline(always)]
     pub(crate) fn _with_raw_cookies<F, T>(&self, f: F) -> T
-        where F: FnOnce(&crate::http::private::cookie::CookieJar) -> T
+    where
+        F: FnOnce(&crate::http::private::cookie::CookieJar) -> T,
     {
         self.inner()._with_raw_cookies(f)
     }
 
     #[inline(always)]
     fn _req<'c, 'u: 'c, U>(&'c self, method: Method, uri: U) -> LocalRequest<'c>
-        where U: TryInto<Origin<'u>> + fmt::Display
+    where
+        U: TryInto<Origin<'u>> + fmt::Display,
     {
         LocalRequest::new(self, method, uri)
     }

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
 use either::Either;
@@ -535,7 +535,7 @@ pub trait FromForm<'r>: Send + Sized {
     /// Processes the external form or field error `_error`.
     ///
     /// The default implementation does nothing, which is always correct.
-    fn push_error(_ctxt: &mut Self::Context, _error: Error<'r>) { }
+    fn push_error(_ctxt: &mut Self::Context, _error: Error<'r>) {}
 
     /// Finalizes parsing. Returns the parsed value when successful or
     /// collection of [`Errors`] otherwise.
@@ -559,7 +559,7 @@ pub struct VecContext<'v, T: FromForm<'v>> {
     last_key: Option<&'v Key>,
     current: Option<T::Context>,
     errors: Errors<'v>,
-    items: Vec<T>
+    items: Vec<T>,
 }
 
 impl<'v, T: FromForm<'v>> VecContext<'v, T> {
@@ -567,7 +567,7 @@ impl<'v, T: FromForm<'v>> VecContext<'v, T> {
         if let Some(current) = self.current.take() {
             match T::finalize(current) {
                 Ok(v) => self.items.push(v),
-                Err(e) => self.errors.extend(e)
+                Err(e) => self.errors.extend(e),
             }
         }
     }
@@ -576,7 +576,7 @@ impl<'v, T: FromForm<'v>> VecContext<'v, T> {
         let this_key = name.key();
         let keys_match = match (self.last_key, this_key) {
             (Some(k1), Some(k2)) if k1 == k2 => true,
-            _ => false
+            _ => false,
         };
 
         if !keys_match {
@@ -585,7 +585,9 @@ impl<'v, T: FromForm<'v>> VecContext<'v, T> {
         }
 
         self.last_key = name.key();
-        self.current.as_mut().expect("must have current if last == index")
+        self.current
+            .as_mut()
+            .expect("must have current if last == index")
     }
 }
 
@@ -621,7 +623,11 @@ impl<'v, T: FromForm<'v> + 'v> FromForm<'v> for Vec<T> {
 }
 
 #[doc(hidden)]
-pub struct MapContext<'v, K, V> where K: FromForm<'v>, V: FromForm<'v> {
+pub struct MapContext<'v, K, V>
+where
+    K: FromForm<'v>,
+    V: FromForm<'v>,
+{
     opts: Options,
     /// Maps from the string key to the index in `map`.
     key_map: IndexMap<&'v str, (usize, NameView<'v>)>,
@@ -631,7 +637,9 @@ pub struct MapContext<'v, K, V> where K: FromForm<'v>, V: FromForm<'v> {
 }
 
 impl<'v, K, V> MapContext<'v, K, V>
-    where K: FromForm<'v>, V: FromForm<'v>
+where
+    K: FromForm<'v>,
+    V: FromForm<'v>,
 {
     fn new(opts: Options) -> Self {
         MapContext {
@@ -652,16 +660,17 @@ impl<'v, K, V> MapContext<'v, K, V>
                 self.keys.push(K::init(self.opts));
                 self.values.push(V::init(self.opts));
                 self.key_map.insert(key, (map_index, name));
-                (self.keys.last_mut().unwrap(), self.values.last_mut().unwrap())
+                (
+                    self.keys.last_mut().unwrap(),
+                    self.values.last_mut().unwrap(),
+                )
             }
         }
     }
 
-    fn push(
-        &mut self,
-        name: NameView<'v>
-    ) -> Option<Either<&mut K::Context, &mut V::Context>> {
-        let index_pair = name.key()
+    fn push(&mut self, name: NameView<'v>) -> Option<Either<&mut K::Context, &mut V::Context>> {
+        let index_pair = name
+            .key()
             .map(|k| k.indices())
             .map(|mut i| (i.next(), i.next()))
             .unwrap_or_default();
@@ -675,7 +684,7 @@ impl<'v, K, V> MapContext<'v, K, V>
                 }
 
                 return Some(Either::Right(val_ctxt));
-            },
+            }
             (Some(kind), Some(key)) => {
                 if kind.as_uncased().starts_with("k") {
                     return Some(Either::Left(self.ctxt(key, name).0));
@@ -721,32 +730,42 @@ impl<'v, K, V> MapContext<'v, K, V>
         let (keys, values, key_map) = (self.keys, self.values, self.key_map);
         let errors = std::cell::RefCell::new(self.errors);
 
-        let keys = keys.into_iter()
+        let keys = keys
+            .into_iter()
             .zip(key_map.values().map(|(_, name)| name))
             .filter_map(|(ctxt, name)| match K::finalize(ctxt) {
                 Ok(value) => Some(value),
-                Err(e) => { errors.borrow_mut().extend(e.with_name(*name)); None },
+                Err(e) => {
+                    errors.borrow_mut().extend(e.with_name(*name));
+                    None
+                }
             });
 
-        let values = values.into_iter()
+        let values = values
+            .into_iter()
             .zip(key_map.values().map(|(_, name)| name))
             .filter_map(|(ctxt, name)| match V::finalize(ctxt) {
                 Ok(value) => Some(value),
-                Err(e) => { errors.borrow_mut().extend(e.with_name(*name)); None },
+                Err(e) => {
+                    errors.borrow_mut().extend(e.with_name(*name));
+                    None
+                }
             });
 
         let map: T = keys.zip(values).collect();
         let no_errors = errors.borrow().is_empty();
         match no_errors {
             true => Ok(map),
-            false => Err(errors.into_inner())
+            false => Err(errors.into_inner()),
         }
     }
 }
 
 #[crate::async_trait]
 impl<'v, K, V> FromForm<'v> for HashMap<K, V>
-    where K: FromForm<'v> + Eq + Hash, V: FromForm<'v>
+where
+    K: FromForm<'v> + Eq + Hash,
+    V: FromForm<'v>,
 {
     type Context = MapContext<'v, K, V>;
 
@@ -769,7 +788,9 @@ impl<'v, K, V> FromForm<'v> for HashMap<K, V>
 
 #[crate::async_trait]
 impl<'v, K, V> FromForm<'v> for BTreeMap<K, V>
-    where K: FromForm<'v> + Ord, V: FromForm<'v>
+where
+    K: FromForm<'v> + Ord,
+    V: FromForm<'v>,
 {
     type Context = MapContext<'v, K, V>;
 
@@ -795,7 +816,10 @@ impl<'v, T: FromForm<'v>> FromForm<'v> for Option<T> {
     type Context = <T as FromForm<'v>>::Context;
 
     fn init(opts: Options) -> Self::Context {
-        T::init(Options { strict: true, ..opts })
+        T::init(Options {
+            strict: true,
+            ..opts
+        })
     }
 
     fn push_value(ctxt: &mut Self::Context, field: ValueField<'v>) {
@@ -842,7 +866,7 @@ pub struct PairContext<'v, A: FromForm<'v>, B: FromForm<'v>> {
 impl<'v, A: FromForm<'v>, B: FromForm<'v>> PairContext<'v, A, B> {
     fn context(
         &mut self,
-        name: NameView<'v>
+        name: NameView<'v>,
     ) -> std::result::Result<Either<&mut A::Context, &mut B::Context>, Error<'v>> {
         match name.key().map(|k| k.as_str()) {
             Some("0") => Ok(Either::Left(&mut self.left)),
@@ -862,7 +886,7 @@ impl<'v, A: FromForm<'v>, B: FromForm<'v>> FromForm<'v> for (A, B) {
         PairContext {
             left: A::init(opts),
             right: B::init(opts),
-            errors: Errors::new()
+            errors: Errors::new(),
         }
     }
 
@@ -887,8 +911,12 @@ impl<'v, A: FromForm<'v>, B: FromForm<'v>> FromForm<'v> for (A, B) {
             (Ok(key), Ok(val)) if ctxt.errors.is_empty() => Ok((key, val)),
             (Ok(_), Ok(_)) => Err(ctxt.errors)?,
             (left, right) => {
-                if let Err(e) = left { ctxt.errors.extend(e); }
-                if let Err(e) = right { ctxt.errors.extend(e); }
+                if let Err(e) = left {
+                    ctxt.errors.extend(e);
+                }
+                if let Err(e) = right {
+                    ctxt.errors.extend(e);
+                }
                 Err(ctxt.errors)?
             }
         }

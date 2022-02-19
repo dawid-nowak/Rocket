@@ -199,15 +199,18 @@ use tracing_subscriber::{
 };
 
 use std::fmt::{self, Write};
-use std::sync::atomic::{AtomicU16, AtomicU64, Ordering::{Acquire, Release}};
 use std::str::FromStr;
+use std::sync::atomic::{
+    AtomicU16, AtomicU64,
+    Ordering::{Acquire, Release},
+};
 
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use yansi::Paint;
-use serde::{de, Serialize, Serializer, Deserialize, Deserializer};
 
 pub use tracing::{
-    trace, debug, info, warn, error, trace_span, debug_span, info_span,
-    warn_span, error_span, instrument,
+    debug, debug_span, error, error_span, info, info_span, instrument, trace, trace_span, warn,
+    warn_span,
 };
 
 pub use tracing_futures::Instrument;
@@ -215,8 +218,8 @@ pub use tracing_subscriber::{registry, EnvFilter as Filter};
 
 /// A prelude for working with `tracing` in Rocket applications.
 pub mod prelude {
-    pub use tracing_subscriber::prelude::*;
     pub use super::Instrument as _;
+    pub use tracing_subscriber::prelude::*;
 }
 
 /// Defines the maximum level of log messages to show.
@@ -279,13 +282,14 @@ impl Serialize for LogLevel {
 impl<'de> Deserialize<'de> for LogLevel {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let string = String::deserialize(de)?;
-        LogLevel::from_str(&string).map_err(|_| de::Error::invalid_value(
-            de::Unexpected::Str(&string),
-            &figment::error::OneOf( &["critical", "normal", "debug", "off"])
-        ))
+        LogLevel::from_str(&string).map_err(|_| {
+            de::Error::invalid_value(
+                de::Unexpected::Str(&string),
+                &figment::error::OneOf(&["critical", "normal", "debug", "off"]),
+            )
+        })
     }
 }
-
 
 /// Returns a Rocket filtering [`Layer`] based on the provided logging level.
 ///
@@ -360,8 +364,7 @@ pub fn filter_layer(level: LogLevel) -> Filter {
         LogLevel::Off => "off",
     };
 
-    tracing_subscriber::filter::EnvFilter::try_new(filter_str)
-        .expect("filter string must parse")
+    tracing_subscriber::filter::EnvFilter::try_new(filter_str).expect("filter string must parse")
 }
 
 /// Returns a Rocket-style log formatting layer.
@@ -421,7 +424,10 @@ where
         // `stdout().write_str(...)`, so that logs are captured by libtest's test
         // capturing.
         .with_test_writer()
-        .event_format(EventFormat { last_id: AtomicU64::new(0), last_depth: AtomicU16::new(0) })
+        .event_format(EventFormat {
+            last_id: AtomicU64::new(0),
+            last_depth: AtomicU16::new(0),
+        })
 }
 
 pub(crate) fn try_init(config: &crate::Config) -> bool {
@@ -449,11 +455,12 @@ pub(crate) fn try_init(config: &crate::Config) -> bool {
         return false;
     }
 
-    let success = tracing::subscriber::set_global_default(tracing_subscriber::registry()
-        .with(logging_layer())
-        .with(filter_layer(config.log_level))
+    let success = tracing::subscriber::set_global_default(
+        tracing_subscriber::registry()
+            .with(logging_layer())
+            .with(filter_layer(config.log_level)),
     )
-        .is_ok();
+    .is_ok();
 
     if !success {
         // Something else already registered a tracing subscriber;
@@ -471,11 +478,16 @@ pub trait PaintExt {
 impl PaintExt for Paint<&str> {
     /// Paint::masked(), but hidden on Windows due to broken output. See #1122.
     fn emoji(_item: &str) -> Paint<&str> {
-        #[cfg(windows)] { Paint::masked("") }
-        #[cfg(not(windows))] { Paint::masked(_item) }
+        #[cfg(windows)]
+        {
+            Paint::masked("")
+        }
+        #[cfg(not(windows))]
+        {
+            Paint::masked(_item)
+        }
     }
 }
-
 
 struct EventFormat {
     last_id: AtomicU64,
@@ -506,10 +518,14 @@ where
             let id = id.into_u64();
             let [z, y, x, w, v, u, t, s] = id.to_le_bytes();
 
-            (z as u16) ^ (y as u16) ^
-                (x as u16) ^ (w as u16) ^
-                (v as u16) << 8 ^ (u as u16) << 8 ^
-                (t as u16) << 8 ^ (s as u16) << 8
+            (z as u16)
+                ^ (y as u16)
+                ^ (x as u16)
+                ^ (w as u16)
+                ^ (v as u16) << 8
+                ^ (u as u16) << 8
+                ^ (t as u16) << 8
+                ^ (s as u16) << 8
         }
 
         cx.visit_spans(|span| {
@@ -533,15 +549,23 @@ where
                     // instead of the span's name (so that we can get nice emojis).
                     if meta.fields().iter().any(|field| field.name() == "message") {
                         if span.name() == "request" {
-                            with_meta(writer, meta, format_args!("[{:x}] {}", hash_id(span.id()), &fields.fields))?;
+                            with_meta(
+                                writer,
+                                meta,
+                                format_args!("[{:x}] {}", hash_id(span.id()), &fields.fields),
+                            )?;
                         } else {
                             with_meta(writer, meta, &fields.fields)?;
                         }
                     } else {
-                        with_meta(writer, meta, format_args!("{} {}", Paint::new(span.name()).bold(), &fields.fields))?;
+                        with_meta(
+                            writer,
+                            meta,
+                            format_args!("{} {}", Paint::new(span.name()).bold(), &fields.fields),
+                        )?;
                     }
                 } else {
-                    with_meta(writer, span.metadata(),  Paint::new(span.name()).bold())?;
+                    with_meta(writer, span.metadata(), Paint::new(span.name()).bold())?;
                 }
             }
 
@@ -562,14 +586,7 @@ where
         #[cfg(not(feature = "log"))]
         let event_meta = event.metadata();
 
-        with_meta(
-            writer,
-            event_meta,
-            DisplayFields {
-                fmt: cx,
-                event,
-            },
-        )?;
+        with_meta(writer, event_meta, DisplayFields { fmt: cx, event })?;
         if root_changed {
             self.last_id.store(root_id.unwrap().into_u64(), Release);
         }
@@ -577,7 +594,6 @@ where
         Ok(())
     }
 }
-
 
 struct DisplayFields<'a, F, R> {
     fmt: &'a F,
@@ -599,7 +615,6 @@ fn with_meta(
     meta: &tracing::Metadata<'_>,
     f: impl fmt::Display,
 ) -> fmt::Result {
-
     struct WithFile<'a, F> {
         meta: &'a tracing::Metadata<'a>,
         f: F,
@@ -616,18 +631,13 @@ fn with_meta(
                     file,
                     line
                 ),
-                (Some(file), None) => write!(
-                    f,
-                    "{}\n    {} {}",
-                    self.f,
-                    Paint::new("-->").bold(),
-                    file,
-                ),
-                _ => write!(f,  "{}", self.f),
+                (Some(file), None) => {
+                    write!(f, "{}\n    {} {}", self.f, Paint::new("-->").bold(), file,)
+                }
+                _ => write!(f, "{}", self.f),
             }
         }
     }
-
 
     match *meta.level() {
         tracing::Level::INFO => writeln!(writer, "{}", Paint::blue(f).wrap()),
@@ -643,7 +653,9 @@ fn with_meta(
             Paint::yellow("Warning:").bold(),
             Paint::yellow(f).wrap()
         ),
-        tracing::Level::TRACE => writeln!(writer, "{}", Paint::magenta(WithFile { meta, f }).wrap()),
+        tracing::Level::TRACE => {
+            writeln!(writer, "{}", Paint::magenta(WithFile { meta, f }).wrap())
+        }
         tracing::Level::DEBUG => writeln!(writer, "{}", Paint::blue(WithFile { meta, f }).wrap()),
     }
 }
@@ -667,7 +679,9 @@ fn try_init_log(filter: LogLevel) -> Result<(), impl std::error::Error> {
             // subscriber, so we don't need to allow `log` records at Info
             // in order to see them.
             .with_max_level(LevelFilter::Warn),
-        LogLevel::Normal => builder.ignore_crate("rustls").with_max_level(LevelFilter::Info),
+        LogLevel::Normal => builder
+            .ignore_crate("rustls")
+            .with_max_level(LevelFilter::Info),
         LogLevel::Debug => builder.with_max_level(LevelFilter::Trace),
         LogLevel::Off => return Ok(()),
     };
@@ -687,7 +701,9 @@ mod skip_log {
     // into event metadata but does not remove the fields it used.
     pub(crate) struct SkipLogFields<V>(pub V);
 
-    impl<'a, V: MakeVisitor<&'a mut (dyn Write + 'a)>> MakeVisitor<&'a mut (dyn Write + 'a)> for SkipLogFields<V> {
+    impl<'a, V: MakeVisitor<&'a mut (dyn Write + 'a)>> MakeVisitor<&'a mut (dyn Write + 'a)>
+        for SkipLogFields<V>
+    {
         type Visitor = SkipLogFields<V::Visitor>;
 
         fn make_visitor(&self, target: &'a mut dyn Write) -> Self::Visitor {
@@ -723,7 +739,11 @@ mod skip_log {
     }
 
     impl<V: VisitOutput<O>, O> VisitOutput<O> for SkipLogFields<V> {
-        fn visit<R>(self, fields: &R) -> O where R: RecordFields, Self: Sized {
+        fn visit<R>(self, fields: &R) -> O
+        where
+            R: RecordFields,
+            Self: Sized,
+        {
             self.0.visit(fields)
         }
 

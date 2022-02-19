@@ -1,22 +1,22 @@
-use std::fmt;
-use std::ops::{Deref, DerefMut};
 use std::convert::TryInto;
+use std::fmt;
 use std::net::SocketAddr;
+use std::ops::{Deref, DerefMut};
 
-use yansi::Paint;
 use either::Either;
 use figment::{Figment, Provider};
+use yansi::Paint;
 
-use crate::{Catcher, Config, Route, Shutdown, sentinel, shield::Shield};
-use crate::router::Router;
-use crate::trip_wire::TripWire;
-use crate::fairing::{Fairing, Fairings};
-use crate::phase::{Phase, Build, Building, Ignite, Igniting, Orbit, Orbiting};
-use crate::phase::{Stateful, StateRef, State};
-use crate::http::uri::{self, Origin};
-use crate::http::ext::IntoOwned;
 use crate::error::{Error, ErrorKind};
+use crate::fairing::{Fairing, Fairings};
+use crate::http::ext::IntoOwned;
+use crate::http::uri::{self, Origin};
+use crate::phase::{Build, Building, Ignite, Igniting, Orbit, Orbiting, Phase};
+use crate::phase::{State, StateRef, Stateful};
+use crate::router::Router;
 use crate::trace::PaintExt;
+use crate::trip_wire::TripWire;
+use crate::{sentinel, shield::Shield, Catcher, Config, Route, Shutdown};
 
 /// The application server itself.
 ///
@@ -154,7 +154,7 @@ impl Rocket<Build> {
     pub fn custom<T: Provider>(provider: T) -> Self {
         // We initialize the logger here so that logging from fairings and so on
         // are visible; we use the final config to set a max log-level in ignite
-        
+
         let rocket: Rocket<Build> = Rocket(Building {
             figment: Figment::from(provider),
             ..Default::default()
@@ -214,11 +214,12 @@ impl Rocket<Build> {
 
     #[track_caller]
     fn load<'a, B, T, F, M>(mut self, kind: &str, base: B, items: Vec<T>, m: M, f: F) -> Self
-        where B: TryInto<Origin<'a>> + Clone + fmt::Display,
-              B::Error: fmt::Display,
-              M: Fn(&Origin<'a>, T) -> Result<T, uri::Error<'static>>,
-              F: Fn(&mut Self, T),
-              T: Clone + fmt::Display,
+    where
+        B: TryInto<Origin<'a>> + Clone + fmt::Display,
+        B::Error: fmt::Display,
+        M: Fn(&Origin<'a>, T) -> Result<T, uri::Error<'static>>,
+        F: Fn(&mut Self, T),
+        T: Clone + fmt::Display,
     {
         let mut base = base.clone().try_into()
             .map(|origin| origin.into_owned())
@@ -231,20 +232,24 @@ impl Rocket<Build> {
             );
 
         if base.query().is_some() {
-            warn!("query in {} base '{}' is ignored", kind, Paint::white(&base));
+            warn!(
+                "query in {} base '{}' is ignored",
+                kind,
+                Paint::white(&base)
+            );
             base.clear_query();
         }
 
         for unmounted_item in items {
-            let item = m(&base, unmounted_item.clone())
-                .unwrap_or_else(|error| {
-                    let span = error_span!("malformed_item", %unmounted_item, "malformed URI in {}", kind);
-                    let _e = span.enter();
-                    error!(%error);
-                    panic!("aborting due to invalid {} URI", kind);
-                });
-                f(&mut self, item);                
-            };                    
+            let item = m(&base, unmounted_item.clone()).unwrap_or_else(|error| {
+                let span =
+                    error_span!("malformed_item", %unmounted_item, "malformed URI in {}", kind);
+                let _e = span.enter();
+                error!(%error);
+                panic!("aborting due to invalid {} URI", kind);
+            });
+            f(&mut self, item);
+        }
         self
     }
 
@@ -304,13 +309,18 @@ impl Rocket<Build> {
     /// ```
     #[track_caller]
     pub fn mount<'a, B, R>(self, base: B, routes: R) -> Self
-        where B: TryInto<Origin<'a>> + Clone + fmt::Display,
-              B::Error: fmt::Display,
-              R: Into<Vec<Route>>
+    where
+        B: TryInto<Origin<'a>> + Clone + fmt::Display,
+        B::Error: fmt::Display,
+        R: Into<Vec<Route>>,
     {
-        self.load("route", base, routes.into(),
+        self.load(
+            "route",
+            base,
+            routes.into(),
             |base, route| route.map_base(|old| format!("{}{}", base, old)),
-            |r, route| r.0.routes.push(route))
+            |r, route| r.0.routes.push(route),
+        )
     }
 
     /// Registers all of the catchers in the supplied vector, scoped to `base`.
@@ -342,13 +352,18 @@ impl Rocket<Build> {
     /// }
     /// ```
     pub fn register<'a, B, C>(self, base: B, catchers: C) -> Self
-        where B: TryInto<Origin<'a>> + Clone + fmt::Display,
-              B::Error: fmt::Display,
-              C: Into<Vec<Catcher>>
+    where
+        B: TryInto<Origin<'a>> + Clone + fmt::Display,
+        B::Error: fmt::Display,
+        C: Into<Vec<Catcher>>,
     {
-        self.load("catcher", base, catchers.into(),
+        self.load(
+            "catcher",
+            base,
+            catchers.into(),
             |base, catcher| catcher.map_base(|old| format!("{}{}", base, old)),
-            |r, catcher| r.0.catchers.push(catcher))
+            |r, catcher| r.0.catchers.push(catcher),
+        )
     }
 
     /// Add `state` to the state managed by this instance of Rocket.
@@ -393,7 +408,8 @@ impl Rocket<Build> {
     /// }
     /// ```
     pub fn manage<T>(self, state: T) -> Self
-        where T: Send + Sync + 'static
+    where
+        T: Send + Sync + 'static,
     {
         let type_name = std::any::type_name::<T>();
         if !self.state.set(state) {
@@ -477,7 +493,9 @@ impl Rocket<Build> {
         // visible but change the max-log-level when we have a final config.
         crate::trace::try_init(&Config::debug_default());
         self = Fairings::handle_ignite(self).await;
-        self.fairings.audit().map_err(|f| ErrorKind::FailedFairings(f.to_vec()))?;
+        self.fairings
+            .audit()
+            .map_err(|f| ErrorKind::FailedFairings(f.to_vec()))?;
 
         // Extract the configuration; initialize the logger.
         #[allow(unused_mut)]
@@ -488,7 +506,9 @@ impl Rocket<Build> {
         #[cfg(feature = "secrets")]
         if !config.secret_key.is_provided() {
             if config.profile != Config::DEBUG_PROFILE {
-                return Err(Error::new(ErrorKind::InsecureSecretKey(config.profile.clone())));
+                return Err(Error::new(ErrorKind::InsecureSecretKey(
+                    config.profile.clone(),
+                )));
             }
 
             if config.secret_key.is_zero() {
@@ -499,8 +519,14 @@ impl Rocket<Build> {
 
         // Initialize the router; check for collisions.
         let mut router = Router::new();
-        self.routes.clone().into_iter().for_each(|r| router.add_route(r));
-        self.catchers.clone().into_iter().for_each(|c| router.add_catcher(c));
+        self.routes
+            .clone()
+            .into_iter()
+            .for_each(|r| router.add_route(r));
+        self.catchers
+            .clone()
+            .into_iter()
+            .for_each(|c| router.add_catcher(c));
         router.finalize().map_err(ErrorKind::Collisions)?;
 
         // Finally, freeze managed state.
@@ -515,7 +541,8 @@ impl Rocket<Build> {
 
         // Ignite the rocket.
         let rocket: Rocket<Ignite> = Rocket(Igniting {
-            router, config,
+            router,
+            config,
             shutdown: Shutdown(TripWire::new()),
             figment: self.0.figment,
             fairings: self.0.fairings,
@@ -531,8 +558,11 @@ impl Rocket<Build> {
 }
 
 fn log_items<T, I, B, O>(e: &str, t: &str, items: I, base: B, origin: O)
-    where T: fmt::Display + Copy, I: Iterator<Item = T>,
-          B: Fn(&T) -> &Origin<'_>, O: Fn(&T) -> &Origin<'_>
+where
+    T: fmt::Display + Copy,
+    I: Iterator<Item = T>,
+    B: Fn(&T) -> &Origin<'_>,
+    O: Fn(&T) -> &Origin<'_>,
 {
     let mut items: Vec<_> = items.collect();
     if !items.is_empty() {
@@ -542,7 +572,9 @@ fn log_items<T, I, B, O>(e: &str, t: &str, items: I, base: B, origin: O)
     items.sort_by_key(|i| origin(i).path().as_str().chars().count());
     items.sort_by_key(|i| origin(i).path().segments().len());
     items.sort_by_key(|i| base(i).path().as_str().chars().count());
-    items.iter().for_each(|i| info!(target: "rocket::support", "{}", i));
+    items
+        .iter()
+        .for_each(|i| info!(target: "rocket::support", "{}", i));
 }
 
 impl Rocket<Ignite> {
@@ -621,17 +653,21 @@ impl Rocket<Ignite> {
     }
 
     async fn _launch(self) -> Result<(), Error> {
-        self.into_orbit().default_tcp_http_server(|rkt| Box::pin(async move {
-            rkt.fairings.handle_liftoff(&rkt).await;
+        self.into_orbit()
+            .default_tcp_http_server(|rkt| {
+                Box::pin(async move {
+                    rkt.fairings.handle_liftoff(&rkt).await;
 
-            let proto = rkt.config.tls_enabled().then(|| "https").unwrap_or("http");
-            let socket_addr = SocketAddr::new(rkt.config.address, rkt.config.port);
-            let addr = format!("{}://{}", proto, socket_addr);
-            info!(target: "rocket::support", "{}{} {}",
+                    let proto = rkt.config.tls_enabled().then(|| "https").unwrap_or("http");
+                    let socket_addr = SocketAddr::new(rkt.config.address, rkt.config.port);
+                    let addr = format!("{}://{}", proto, socket_addr);
+                    info!(target: "rocket::support", "{}{} {}",
                 Paint::emoji("🚀 "),
                 Paint::default("Rocket has launched from").bold(),
                 Paint::default(&addr).bold().underline());
-        })).await
+                })
+            })
+            .await
     }
 }
 
@@ -795,7 +831,7 @@ impl<P: Phase> Rocket<P> {
         let rocket = match self.0.into_state() {
             State::Build(s) => Rocket::from(s).ignite().await?._local_launch().await,
             State::Ignite(s) => Rocket::from(s)._local_launch().await,
-            State::Orbit(s) => Rocket::from(s)
+            State::Orbit(s) => Rocket::from(s),
         };
 
         Ok(rocket)
@@ -847,7 +883,7 @@ impl<P: Phase> Rocket<P> {
         match self.0.into_state() {
             State::Build(s) => Rocket::from(s).ignite().await?._launch().await,
             State::Ignite(s) => Rocket::from(s)._launch().await,
-            State::Orbit(_) => Ok(())
+            State::Orbit(_) => Ok(()),
         }
     }
 }

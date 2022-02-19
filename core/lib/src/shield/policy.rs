@@ -1,13 +1,17 @@
 //! Module containing the [`Policy`] trait and types that implement it.
 
-use std::fmt;
 use std::borrow::Cow;
+use std::fmt;
 
 use indexmap::IndexMap;
 use rocket_http::{ext::IntoCollection, private::SmallVec};
 use time::Duration;
 
-use crate::http::{Header, uri::Absolute, uncased::{UncasedStr, Uncased}};
+use crate::http::{
+    uncased::{Uncased, UncasedStr},
+    uri::Absolute,
+    Header,
+};
 
 /// Trait implemented by security and privacy policy headers.
 ///
@@ -81,7 +85,7 @@ impl<P: Policy> SubPolicy for P {
 }
 
 macro_rules! impl_policy {
-    ($T:ty, $name:expr) => (
+    ($T:ty, $name:expr) => {
         impl Policy for $T {
             const NAME: &'static str = $name;
 
@@ -89,7 +93,7 @@ macro_rules! impl_policy {
                 self.into()
             }
         }
-    )
+    };
 }
 
 // Keep this in-sync with the top-level module docs.
@@ -146,7 +150,7 @@ pub enum Referrer {
     /// the full URL of TLS protected resources to insecure origins. Use with
     /// caution._
     UnsafeUrl,
- }
+}
 
 /// Defaults to [`Referrer::NoReferrer`]. Tells the browser to omit the
 /// `Referer` header.
@@ -219,13 +223,17 @@ impl Default for ExpectCt {
 
 impl From<&ExpectCt> for Header<'static> {
     fn from(expect: &ExpectCt) -> Self {
-        let policy_string =  match expect {
+        let policy_string = match expect {
             ExpectCt::Enforce(age) => format!("max-age={}, enforce", age.whole_seconds()),
             ExpectCt::Report(age, uri) => {
                 format!(r#"max-age={}, report-uri="{}""#, age.whole_seconds(), uri)
             }
             ExpectCt::ReportAndEnforce(age, uri) => {
-                format!("max-age={}, enforce, report-uri=\"{}\"", age.whole_seconds(), uri)
+                format!(
+                    "max-age={}, enforce, report-uri=\"{}\"",
+                    age.whole_seconds(),
+                    uri
+                )
             }
         };
 
@@ -306,7 +314,7 @@ impl From<&Hsts> for Header<'static> {
         if hsts == &Hsts::default() {
             static DEFAULT: Header<'static> = Header {
                 name: Uncased::from_borrowed(Hsts::NAME),
-                value: Cow::Borrowed("max-age=31536000")
+                value: Cow::Borrowed("max-age=31536000"),
             };
 
             return DEFAULT.clone();
@@ -451,7 +459,7 @@ impl From<&Prefetch> for Header<'static> {
 /// builder method.
 ///
 /// ```rust
-    /// # #[macro_use] extern crate rocket;
+/// # #[macro_use] extern crate rocket;
 /// use rocket::shield::{Shield, Permission, Feature, Allow};
 ///
 /// // In addition to defaults, block access to geolocation and USB features.
@@ -514,7 +522,8 @@ impl Permission {
     /// let perm = Permission::allowed(Feature::Usb, [Allow::This, rocket]);
     /// ```
     pub fn allowed<L>(feature: Feature, allow: L) -> Self
-        where L: IntoCollection<Allow>
+    where
+        L: IntoCollection<Allow>,
     {
         Permission(IndexMap::new()).allow(feature, allow)
     }
@@ -560,7 +569,8 @@ impl Permission {
     ///     .allow(Feature::Payment, [rocket, Allow::This]);
     /// ```
     pub fn allow<L>(mut self, feature: Feature, allow: L) -> Self
-        where L: IntoCollection<Allow>
+    where
+        L: IntoCollection<Allow>,
     {
         let mut allow = allow.into_collection();
 
@@ -641,7 +651,9 @@ impl Permission {
     /// ]);
     /// ```
     pub fn iter(&self) -> impl Iterator<Item = (Feature, Option<&[Allow]>)> {
-        self.0.iter().map(|(feature, list)| (*feature, list.as_deref()))
+        self.0
+            .iter()
+            .map(|(feature, list)| (*feature, list.as_deref()))
     }
 }
 
@@ -650,15 +662,18 @@ impl From<&Permission> for Header<'static> {
         if perm == &Permission::default() {
             static DEFAULT: Header<'static> = Header {
                 name: Uncased::from_borrowed(Permission::NAME),
-                value: Cow::Borrowed("interest-cohort=()")
+                value: Cow::Borrowed("interest-cohort=()"),
             };
 
             return DEFAULT.clone();
         }
 
-        let value = perm.0.iter()
+        let value = perm
+            .0
+            .iter()
             .map(|(feature, allow)| {
-                let list = allow.as_ref()
+                let list = allow
+                    .as_ref()
                     .into_iter()
                     .flatten()
                     .map(|origin| origin.rendered())
@@ -729,7 +744,6 @@ impl Allow {
 #[non_exhaustive]
 pub enum Feature {
     // Standardized.
-
     /// The "accelerometer" feature.
     Accelerometer,
     /// The "ambient-light-sensor" feature.
@@ -784,7 +798,6 @@ pub enum Feature {
     XrSpatialTracking,
 
     // Proposed.
-
     /// The "clipboard-read" feature.
     ClipboardRead,
     /// The "clipboard-write" feature.
@@ -797,7 +810,6 @@ pub enum Feature {
     InterestCohort,
 
     // Experimental.
-
     /// The "conversion-measurement" feature.
     ConversionMeasurement,
     /// The "focus-without-user-activation" feature.

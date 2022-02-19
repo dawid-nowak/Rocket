@@ -1,11 +1,9 @@
-#![recursion_limit="256"]
-
+#![recursion_limit = "256"]
 #![doc(html_root_url = "https://api.rocket.rs/v0.5-rc")]
 #![doc(html_favicon_url = "https://rocket.rs/images/favicon.ico")]
 #![doc(html_logo_url = "https://rocket.rs/images/logo-boxed.png")]
 #![cfg_attr(nightly, feature(doc_cfg))]
 #![cfg_attr(nightly, feature(decl_macro))]
-
 #![warn(rust_2018_idioms)]
 #![warn(missing_docs)]
 
@@ -97,40 +95,48 @@
 //!
 //! [testing chapter of the guide]: https://rocket.rs/master/guide/testing/#testing
 
-#[allow(unused_imports)] #[macro_use] extern crate rocket_codegen;
-pub use rocket_codegen::*;
+#[allow(unused_imports)]
+#[macro_use]
+extern crate rocket_codegen;
 pub use async_trait::*;
+pub use rocket_codegen::*;
 
-#[macro_use] extern crate tracing;
+#[macro_use]
+extern crate tracing;
+#[doc(hidden)]
+pub use async_stream;
+pub use figment;
+pub use futures;
+pub use time;
+pub use tokio;
 ///! [configuration guide]: https://rocket.rs/v0.5-rc/guide/configuration/
 ///! [testing guide]: https://rocket.rs/v0.5-rc/guide/testing/#testing
 ///! [Figment]: https://docs.rs/figment
 
 /// These are public dependencies! Update docs if these are changed, especially
 /// figment's version number in docs.
-#[doc(hidden)] pub use yansi;
-#[doc(hidden)] pub use async_stream;
-pub use futures;
-pub use tokio;
-pub use figment;
-pub use time;
+#[doc(hidden)]
+pub use yansi;
 
-#[macro_use] pub mod outcome;
-#[macro_use] pub mod data;
-#[doc(hidden)] pub mod sentinel;
+#[macro_use]
+pub mod outcome;
+#[macro_use]
+pub mod data;
+pub mod catcher;
+pub mod config;
+pub mod error;
+pub mod fairing;
+pub mod form;
+pub mod fs;
 pub mod local;
 pub mod request;
 pub mod response;
-pub mod config;
-pub mod form;
-pub mod fairing;
-pub mod error;
-pub mod catcher;
 pub mod route;
-pub mod trace;
+#[doc(hidden)]
+pub mod sentinel;
 pub mod serde;
 pub mod shield;
-pub mod fs;
+pub mod trace;
 
 // Reexport of HTTP everything.
 pub mod http {
@@ -150,31 +156,42 @@ pub mod http {
 #[cfg_attr(nightly, doc(cfg(feature = "mtls")))]
 pub mod mtls;
 
-/// TODO: We need a futures mod or something.
-mod trip_wire;
-mod shutdown;
-mod server;
-mod ext;
-mod state;
 mod cookies;
+mod ext;
+mod phase;
 mod rocket;
 mod router;
-mod phase;
+mod server;
+mod shutdown;
+mod state;
+mod tracingcontext;
+/// TODO: We need a futures mod or something.
+mod trip_wire;
 
-#[doc(inline)] pub use crate::response::Response;
-#[doc(inline)] pub use crate::data::Data;
-#[doc(inline)] pub use crate::config::Config;
-#[doc(inline)] pub use crate::catcher::Catcher;
-#[doc(inline)] pub use crate::route::Route;
-#[doc(hidden)] pub use either::Either;
-#[doc(inline)] pub use phase::{Phase, Build, Ignite, Orbit};
-#[doc(inline)] pub use error::Error;
-#[doc(inline)] pub use sentinel::Sentinel;
-#[doc(inline)] pub use rocket_codegen::*;
-pub use crate::rocket::Rocket;
+#[doc(inline)]
+pub use crate::catcher::Catcher;
+#[doc(inline)]
+pub use crate::config::Config;
+#[doc(inline)]
+pub use crate::data::Data;
 pub use crate::request::Request;
+#[doc(inline)]
+pub use crate::response::Response;
+pub use crate::rocket::Rocket;
+#[doc(inline)]
+pub use crate::route::Route;
 pub use crate::shutdown::Shutdown;
 pub use crate::state::State;
+#[doc(hidden)]
+pub use either::Either;
+#[doc(inline)]
+pub use error::Error;
+#[doc(inline)]
+pub use phase::{Build, Ignite, Orbit, Phase};
+#[doc(inline)]
+pub use rocket_codegen::*;
+#[doc(inline)]
+pub use sentinel::Sentinel;
 
 /// Creates a [`Rocket`] instance with the default config provider: aliases
 /// [`Rocket::build()`].

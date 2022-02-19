@@ -76,8 +76,8 @@
 //! features = ["v1", "v4"]
 //! ```
 
-use crate::request::FromParam;
 use crate::form::{self, FromFormField, ValueField};
+use crate::request::FromParam;
 
 /// A Universally Unique Identifier (UUID).
 ///
@@ -123,7 +123,7 @@ impl<'v> FromFormField<'v> for Uuid {
 
 #[cfg(test)]
 mod test {
-    use super::{Uuid, FromParam};
+    use super::{FromParam, Uuid};
 
     #[test]
     fn test_from_param() {

@@ -1,10 +1,10 @@
 //! Types representing various errors that can occur in a Rocket application.
 
-use std::{io, fmt};
-use std::sync::atomic::{Ordering, AtomicBool};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{fmt, io};
 
-use yansi::Paint;
 use figment::Profile;
+use yansi::Paint;
 
 /// An error that occurs during launch.
 ///
@@ -59,7 +59,7 @@ use figment::Profile;
 ///   2. You want to display your own error messages.
 pub struct Error {
     handled: AtomicBool,
-    kind: ErrorKind
+    kind: ErrorKind,
 }
 
 /// The kind error that occurred.
@@ -100,7 +100,10 @@ impl From<ErrorKind> for Error {
 impl Error {
     #[inline(always)]
     pub(crate) fn new(kind: ErrorKind) -> Error {
-        Error { handled: AtomicBool::new(false), kind }
+        Error {
+            handled: AtomicBool::new(false),
+            kind,
+        }
     }
 
     #[inline(always)]
@@ -136,7 +139,7 @@ impl Error {
     }
 }
 
-impl std::error::Error for Error {  }
+impl std::error::Error for Error {}
 
 impl fmt::Display for ErrorKind {
     #[inline]
@@ -174,27 +177,39 @@ impl Drop for Error {
     fn drop(&mut self) {
         // Don't panic if the message has been seen. Don't double-panic.
         if self.was_handled() || std::thread::panicking() {
-            return
+            return;
         }
 
         match self.kind() {
             ErrorKind::Bind(ref error) => {
-                error_span!("bind_error", "Rocket failed to bind network socket to given address/port.").in_scope(|| {
+                error_span!(
+                    "bind_error",
+                    "Rocket failed to bind network socket to given address/port."
+                )
+                .in_scope(|| {
                     info!(%error);
                 });
                 panic!("aborting due to socket bind error");
             }
             ErrorKind::Io(ref error) => {
-                error_span!("io_error", "Rocket failed to launch due to an I/O error.").in_scope(|| {
-                    info!(%error);
-                });
+                error_span!("io_error", "Rocket failed to launch due to an I/O error.").in_scope(
+                    || {
+                        info!(%error);
+                    },
+                );
                 panic!("aborting due to i/o error");
             }
             ErrorKind::Collisions(ref collisions) => {
                 fn log_collisions<T: fmt::Display>(kind: &str, collisions: &[(T, T)]) {
-                    if collisions.is_empty() { return }
+                    if collisions.is_empty() {
+                        return;
+                    }
 
-                    let span = error_span!("collisions", "Rocket failed to launch due to the following {} collisions:", kind);
+                    let span = error_span!(
+                        "collisions",
+                        "Rocket failed to launch due to the following {} collisions:",
+                        kind
+                    );
                     let _e = span.enter();
                     for &(ref a, ref b) in collisions {
                         info!("{} {} {}", a, Paint::red("collides with").italic(), b)
@@ -208,7 +223,11 @@ impl Drop for Error {
                 panic!("routing collisions detected");
             }
             ErrorKind::FailedFairings(ref failures) => {
-                error_span!("fairing_error", "Rocket failed to launch due to failing fairings:").in_scope(|| {
+                error_span!(
+                    "fairing_error",
+                    "Rocket failed to launch due to failing fairings:"
+                )
+                .in_scope(|| {
                     for fairing in failures {
                         info!("{}", fairing.name);
                     }
@@ -222,7 +241,11 @@ impl Drop for Error {
                 panic!("aborting due to runtime failure");
             }
             ErrorKind::InsecureSecretKey(ref profile) => {
-                error_span!("insecure_secret_key", "secrets enabled in non-debug without `secret_key`").in_scope(|| {
+                error_span!(
+                    "insecure_secret_key",
+                    "secrets enabled in non-debug without `secret_key`"
+                )
+                .in_scope(|| {
                     info!("selected profile: {}", Paint::white(profile));
                     info!("disable `secrets` feature or configure a `secret_key`");
                 });

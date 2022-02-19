@@ -1,14 +1,14 @@
 use std::net::{IpAddr, Ipv4Addr};
 
-use figment::{Figment, Profile, Provider, Metadata, error::Result};
-use figment::providers::{Serialized, Env, Toml, Format};
-use figment::value::{Map, Dict, magic::RelativePathBuf};
+use figment::providers::{Env, Format, Serialized, Toml};
+use figment::value::{magic::RelativePathBuf, Dict, Map};
+use figment::{error::Result, Figment, Metadata, Profile, Provider};
 use serde::{Deserialize, Serialize};
 use yansi::Paint;
 
-use crate::config::{LogLevel, Shutdown, Ident};
-use crate::request::{self, Request, FromRequest};
+use crate::config::{Ident, LogLevel, Shutdown};
 use crate::data::Limits;
+use crate::request::{self, FromRequest, Request};
 
 #[cfg(feature = "tls")]
 use crate::config::TlsConfig;
@@ -131,19 +131,29 @@ impl Default for Config {
     /// let config = Config::default();
     /// ```
     fn default() -> Config {
-        #[cfg(debug_assertions)] { Config::debug_default() }
-        #[cfg(not(debug_assertions))] { Config::release_default() }
+        #[cfg(debug_assertions)]
+        {
+            Config::debug_default()
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            Config::release_default()
+        }
     }
 }
 
 impl Config {
     const DEPRECATED_KEYS: &'static [(&'static str, Option<&'static str>)] = &[
-        ("env", Some(Self::PROFILE)), ("log", Some(Self::LOG_LEVEL)),
-        ("read_timeout", None), ("write_timeout", None),
+        ("env", Some(Self::PROFILE)),
+        ("log", Some(Self::LOG_LEVEL)),
+        ("read_timeout", None),
+        ("write_timeout", None),
     ];
 
     const DEPRECATED_PROFILES: &'static [(&'static str, Option<&'static str>)] = &[
-        ("dev", Some("debug")), ("prod", Some("release")), ("stag", None)
+        ("dev", Some("debug")),
+        ("prod", Some("release")),
+        ("stag", None),
     ];
 
     /// Returns the default configuration for the `debug` profile, _irrespective
@@ -237,7 +247,10 @@ impl Config {
         Figment::from(Config::default())
             .merge(Toml::file(Env::var_or("ROCKET_CONFIG", "Rocket.toml")).nested())
             .merge(Env::prefixed("ROCKET_").ignore(&["PROFILE"]).global())
-            .select(Profile::from_env_or("ROCKET_PROFILE", Self::DEFAULT_PROFILE))
+            .select(Profile::from_env_or(
+                "ROCKET_PROFILE",
+                Self::DEFAULT_PROFILE,
+            ))
     }
 
     /// Attempts to extract a `Config` from `provider`, returning the result.
@@ -309,11 +322,17 @@ impl Config {
     /// }
     /// ```
     pub fn tls_enabled(&self) -> bool {
-        #[cfg(feature = "tls")] {
-            self.tls.as_ref().map_or(false, |tls| !tls.ciphers.is_empty())
+        #[cfg(feature = "tls")]
+        {
+            self.tls
+                .as_ref()
+                .map_or(false, |tls| !tls.ciphers.is_empty())
         }
 
-        #[cfg(not(feature = "tls"))] { false }
+        #[cfg(not(feature = "tls"))]
+        {
+            false
+        }
     }
 
     /// Returns `true` if mTLS is enabled.
@@ -337,11 +356,15 @@ impl Config {
             return false;
         }
 
-        #[cfg(feature = "mtls")] {
+        #[cfg(feature = "mtls")]
+        {
             self.tls.as_ref().map_or(false, |tls| tls.mutual.is_some())
         }
 
-        #[cfg(not(feature = "mtls"))] { false }
+        #[cfg(not(feature = "mtls"))]
+        {
+            false
+        }
     }
 
     pub(crate) fn pretty_print(&self, figment: &Figment) {
@@ -367,7 +390,8 @@ impl Config {
             false => info!(target: "rocket::support", tls = %"disabled"),
         }
 
-        #[cfg(feature = "secrets")] {
+        #[cfg(feature = "secrets")]
+        {
             info!(target: "rocket::support", secret_key = ?&self.secret_key);
             if !self.secret_key.is_provided() {
                 warn_span!(target: "rocket::support", "missing_secret_key", "secrets enabled without a stable `secret_key`").in_scope(|| {
@@ -514,24 +538,51 @@ pub fn pretty_print_error(error: figment::Error) {
 
     error!("Rocket configuration extraction from provider failed.");
     for e in error {
-        fn w<T: std::fmt::Display>(v: T) -> Paint<T> { Paint::white(v) }
+        fn w<T: std::fmt::Display>(v: T) -> Paint<T> {
+            Paint::white(v)
+        }
 
         let span = match &e.kind {
             Kind::Message(msg) => error_span!("config_error", "{}", msg),
             Kind::InvalidType(v, exp) => {
-                error_span!("config_error", "invalid type: found {}, expected {}", w(v), w(exp))
+                error_span!(
+                    "config_error",
+                    "invalid type: found {}, expected {}",
+                    w(v),
+                    w(exp)
+                )
             }
             Kind::InvalidValue(v, exp) => {
-                error_span!("config_error", "invalid value {}, expected {}", w(v), w(exp))
-            },
+                error_span!(
+                    "config_error",
+                    "invalid value {}, expected {}",
+                    w(v),
+                    w(exp)
+                )
+            }
             Kind::InvalidLength(v, exp) => {
-                error_span!("config_error", "invalid length {}, expected {}", w(v), w(exp))
-            },
+                error_span!(
+                    "config_error",
+                    "invalid length {}, expected {}",
+                    w(v),
+                    w(exp)
+                )
+            }
             Kind::UnknownVariant(v, exp) => {
-                error_span!("config_error", "unknown variant: found `{}`, expected `{}`", w(v), w(OneOf(exp)))
+                error_span!(
+                    "config_error",
+                    "unknown variant: found `{}`, expected `{}`",
+                    w(v),
+                    w(OneOf(exp))
+                )
             }
             Kind::UnknownField(v, exp) => {
-                error_span!("config_error", "unknown field: found `{}`, expected `{}`", w(v), w(OneOf(exp)))
+                error_span!(
+                    "config_error",
+                    "unknown field: found `{}`, expected `{}`",
+                    w(v),
+                    w(OneOf(exp))
+                )
             }
             Kind::MissingField(v) => {
                 error_span!("config_error", "missing field `{}`", w(v))
@@ -543,13 +594,22 @@ pub fn pretty_print_error(error: figment::Error) {
                 error_span!("config_error", "signed integer `{}` is out of range", w(v))
             }
             Kind::USizeOutOfRange(v) => {
-                error_span!("config_error", "unsigned integer `{}` is out of range", w(v))
+                error_span!(
+                    "config_error",
+                    "unsigned integer `{}` is out of range",
+                    w(v)
+                )
             }
             Kind::Unsupported(v) => {
                 error_span!("config_error", "unsupported type `{}`", w(v))
             }
             Kind::UnsupportedKey(a, e) => {
-                error_span!("config_error", "unsupported type `{}` for key: must be `{}`", w(a), w(e))
+                error_span!(
+                    "config_error",
+                    "unsupported type `{}` for key: must be `{}`",
+                    w(a),
+                    w(e)
+                )
             }
         };
 

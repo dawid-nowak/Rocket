@@ -1,17 +1,17 @@
+use std::path::{Path, PathBuf};
 use std::{io, mem};
-use std::path::{PathBuf, Path};
 
-use crate::Request;
-use crate::http::{ContentType, Status};
-use crate::data::{self, FromData, Data, Capped, N, Limits};
-use crate::form::{FromFormField, ValueField, DataField, error::Errors};
-use crate::outcome::IntoOutcome;
+use crate::data::{self, Capped, Data, FromData, Limits, N};
+use crate::form::{error::Errors, DataField, FromFormField, ValueField};
 use crate::fs::FileName;
+use crate::http::{ContentType, Status};
+use crate::outcome::IntoOutcome;
+use crate::Request;
 
+use either::Either;
+use tempfile::{NamedTempFile, TempPath};
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
-use tempfile::{NamedTempFile, TempPath};
-use either::Either;
 
 /// A data and form guard that streams data into a temporary file.
 ///
@@ -108,9 +108,7 @@ pub enum TempFile<'v> {
         len: u64,
     },
     #[doc(hidden)]
-    Buffered {
-        content: &'v str,
-    }
+    Buffered { content: &'v str },
 }
 
 impl<'v> TempFile<'v> {
@@ -163,7 +161,8 @@ impl<'v> TempFile<'v> {
     /// # rocket::async_test(handle(file)).unwrap();
     /// ```
     pub async fn persist_to<P>(&mut self, path: P) -> io::Result<()>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         let new_path = path.as_ref().to_path_buf();
         match self {
@@ -173,13 +172,15 @@ impl<'v> TempFile<'v> {
                     Either::Left(temp) => {
                         let result = tokio::task::spawn_blocking(move || temp.persist(new_path))
                             .await
-                            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "spawn_block"))?;
+                            .map_err(|_| {
+                                io::Error::new(io::ErrorKind::BrokenPipe, "spawn_block")
+                            })?;
 
                         if let Err(e) = result {
                             *either = Either::Left(e.path);
                             return Err(e.error);
                         }
-                    },
+                    }
                     Either::Right(prev) => {
                         if let Err(e) = fs::rename(&prev, new_path).await {
                             *either = Either::Right(prev);
@@ -195,7 +196,7 @@ impl<'v> TempFile<'v> {
                     file_name: None,
                     content_type: None,
                     path: Either::Right(new_path),
-                    len: content.len() as u64
+                    len: content.len() as u64,
                 };
             }
         }
@@ -235,7 +236,8 @@ impl<'v> TempFile<'v> {
     /// # rocket::async_test(handle(file)).unwrap();
     /// ```
     pub async fn copy_to<P>(&mut self, path: P) -> io::Result<()>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         match self {
             TempFile::File { path: either, .. } => {
@@ -244,13 +246,15 @@ impl<'v> TempFile<'v> {
                     Either::Left(temp) => {
                         let result = tokio::task::spawn_blocking(move || temp.keep())
                             .await
-                            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "spawn_block"))?;
+                            .map_err(|_| {
+                                io::Error::new(io::ErrorKind::BrokenPipe, "spawn_block")
+                            })?;
 
                         if let Err(e) = result {
                             *either = Either::Left(e.path);
                             return Err(e.error);
                         }
-                    },
+                    }
                     Either::Right(_) => { /* do nada */ }
                 };
 
@@ -264,7 +268,7 @@ impl<'v> TempFile<'v> {
                     file_name: None,
                     content_type: None,
                     path: Either::Right(path.to_path_buf()),
-                    len: content.len() as u64
+                    len: content.len() as u64,
                 };
             }
         }
@@ -301,7 +305,8 @@ impl<'v> TempFile<'v> {
     /// # rocket::async_test(handle(file)).unwrap();
     /// ```
     pub async fn move_copy_to<P>(&mut self, path: P) -> io::Result<()>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         let dest = path.as_ref();
         self.copy_to(dest).await?;
@@ -359,8 +364,14 @@ impl<'v> TempFile<'v> {
     /// ```
     pub fn path(&self) -> Option<&Path> {
         match self {
-            TempFile::File { path: Either::Left(p), .. } => Some(p.as_ref()),
-            TempFile::File { path: Either::Right(p), .. } => Some(p.as_path()),
+            TempFile::File {
+                path: Either::Left(p),
+                ..
+            } => Some(p.as_ref()),
+            TempFile::File {
+                path: Either::Right(p),
+                ..
+            } => Some(p.as_path()),
             TempFile::Buffered { .. } => None,
         }
     }
@@ -413,7 +424,7 @@ impl<'v> TempFile<'v> {
     pub fn raw_name(&self) -> Option<&FileName> {
         match *self {
             TempFile::File { file_name, .. } => file_name,
-            TempFile::Buffered { .. } => None
+            TempFile::Buffered { .. } => None,
         }
     }
 
@@ -435,7 +446,7 @@ impl<'v> TempFile<'v> {
     pub fn content_type(&self) -> Option<&ContentType> {
         match self {
             TempFile::File { content_type, .. } => content_type.as_ref(),
-            TempFile::Buffered { .. } => None
+            TempFile::Buffered { .. } => None,
         }
     }
 
@@ -445,24 +456,27 @@ impl<'v> TempFile<'v> {
         file_name: Option<&'a FileName>,
         content_type: Option<ContentType>,
     ) -> io::Result<Capped<TempFile<'a>>> {
-        let limit = content_type.as_ref()
+        let limit = content_type
+            .as_ref()
             .and_then(|ct| ct.extension())
             .and_then(|ext| req.limits().find(&["file", ext.as_str()]))
             .or_else(|| req.limits().get("file"))
             .unwrap_or(Limits::FILE);
 
         let temp_dir = req.rocket().config().temp_dir.relative();
-        let file = tokio::task::spawn_blocking(move || {
-            NamedTempFile::new_in(temp_dir)
-        }).await.map_err(|_| {
-            io::Error::new(io::ErrorKind::BrokenPipe, "spawn_block panic")
-        })??;
+        let file = tokio::task::spawn_blocking(move || NamedTempFile::new_in(temp_dir))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "spawn_block panic"))??;
 
         let (file, temp_path) = file.into_parts();
         let mut file = File::from_std(file);
-        let n = data.open(limit).stream_to(tokio::io::BufWriter::new(&mut file)).await?;
+        let n = data
+            .open(limit)
+            .stream_to(tokio::io::BufWriter::new(&mut file))
+            .await?;
         let temp_file = TempFile::File {
-            content_type, file_name,
+            content_type,
+            file_name,
             path: Either::Left(temp_path),
             len: n.written,
         };
@@ -474,13 +488,19 @@ impl<'v> TempFile<'v> {
 #[crate::async_trait]
 impl<'v> FromFormField<'v> for Capped<TempFile<'v>> {
     fn from_value(field: ValueField<'v>) -> Result<Self, Errors<'v>> {
-        let n = N { written: field.value.len() as u64, complete: true  };
-        Ok(Capped::new(TempFile::Buffered { content: field.value }, n))
+        let n = N {
+            written: field.value.len() as u64,
+            complete: true,
+        };
+        Ok(Capped::new(
+            TempFile::Buffered {
+                content: field.value,
+            },
+            n,
+        ))
     }
 
-    async fn from_data(
-        f: DataField<'v, '_>
-    ) -> Result<Self, Errors<'v>> {
+    async fn from_data(f: DataField<'v, '_>) -> Result<Self, Errors<'v>> {
         Ok(TempFile::from(f.request, f.data, f.file_name, Some(f.content_type)).await?)
     }
 }
@@ -494,13 +514,20 @@ impl<'r> FromData<'r> for Capped<TempFile<'_>> {
 
         let has_form = |ty: &ContentType| ty.is_form_data() || ty.is_form();
         if req.content_type().map_or(false, has_form) {
-            let (tf, form) = (Paint::white("TempFile<'_>"), Paint::white("Form<TempFile<'_>>"));
+            let (tf, form) = (
+                Paint::white("TempFile<'_>"),
+                Paint::white("Form<TempFile<'_>>"),
+            );
             warn!("Request contains a form that will not be processed.");
-            info!("Bare `{}` data guard writes raw, unprocessed streams to disk.", tf);
+            info!(
+                "Bare `{}` data guard writes raw, unprocessed streams to disk.",
+                tf
+            );
             info!("Did you mean to use `{}` instead?", form);
         }
 
-        TempFile::from(req, data, None, req.content_type().cloned()).await
+        TempFile::from(req, data, None, req.content_type().cloned())
+            .await
             .into_outcome(Status::BadRequest)
     }
 }

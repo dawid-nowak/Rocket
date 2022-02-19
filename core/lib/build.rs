@@ -1,6 +1,9 @@
 //! Ensures Rocket isn't compiled with an incompatible version of Rust.
 
-use yansi::{Paint, Color::{Red, Yellow}};
+use yansi::{
+    Color::{Red, Yellow},
+    Paint,
+};
 
 fn main() {
     const MIN_VERSION: &str = "1.46.0";

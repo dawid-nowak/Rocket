@@ -1,13 +1,13 @@
 use std::cell::UnsafeCell;
 
-use multer::Multipart;
-use parking_lot::{RawMutex, lock_api::RawMutex as _};
 use either::Either;
+use multer::Multipart;
+use parking_lot::{lock_api::RawMutex as _, RawMutex};
 
-use crate::request::{Request, local_cache};
 use crate::data::{Data, Limits, Outcome};
 use crate::form::prelude::*;
 use crate::http::RawStr;
+use crate::request::{local_cache, Request};
 
 type Result<'r, T> = std::result::Result<T, Error<'r>>;
 
@@ -38,7 +38,7 @@ pub enum Parser<'r, 'i> {
 impl<'r, 'i> Parser<'r, 'i> {
     pub async fn new(
         req: &'r Request<'i>,
-        data: Data<'r>
+        data: Data<'r>,
     ) -> Outcome<'r, Parser<'r, 'i>, Errors<'r>> {
         let parser = match req.content_type() {
             Some(c) if c.is_form() => Self::from_form(req, data).await,
@@ -48,7 +48,7 @@ impl<'r, 'i> Parser<'r, 'i> {
 
         match parser {
             Ok(storage) => Outcome::Success(storage),
-            Err(e) => Outcome::Failure((e.status(), e.into()))
+            Err(e) => Outcome::Failure((e.status(), e.into())),
         }
     }
 
@@ -66,14 +66,13 @@ impl<'r, 'i> Parser<'r, 'i> {
     }
 
     async fn from_multipart(req: &'r Request<'i>, data: Data<'r>) -> Result<'r, Parser<'r, 'i>> {
-        let boundary = req.content_type()
+        let boundary = req
+            .content_type()
             .ok_or(multer::Error::NoMultipart)?
             .param("boundary")
             .ok_or(multer::Error::NoBoundary)?;
 
-        let form_limit = req.limits()
-            .get("data-form")
-            .unwrap_or(Limits::DATA_FORM);
+        let form_limit = req.limits().get("data-form").unwrap_or(Limits::DATA_FORM);
 
         Ok(Parser::Multipart(MultipartParser {
             request: req,
@@ -86,7 +85,7 @@ impl<'r, 'i> Parser<'r, 'i> {
     pub async fn next(&mut self) -> Option<Result<'r, Field<'r, 'i>>> {
         match self {
             Parser::Multipart(ref mut p) => p.next().await,
-            Parser::RawStr(ref mut p) => p.next().map(|f| Ok(Either::Left(f)))
+            Parser::RawStr(ref mut p) => p.next().map(|f| Ok(Either::Left(f))),
         }
     }
 }
@@ -140,7 +139,10 @@ mod raw_str_parse_tests {
     fn test_skips_empty() {
         let buffer = super::Buffer::new();
         let fields: Vec<_> = super::RawStrParser::new(&buffer, "a&b=c&&&c".into()).collect();
-        assert_eq!(fields, &[Field::parse("a"), Field::parse("b=c"), Field::parse("c")]);
+        assert_eq!(
+            fields,
+            &[Field::parse("a"), Field::parse("b=c"), Field::parse("c")]
+        );
     }
 
     #[test]
@@ -192,7 +194,7 @@ impl<'r, 'i> MultipartParser<'r, 'i> {
         } else {
             let (mut buf, len) = match field.name() {
                 Some(s) => (s.to_string(), s.len()),
-                None => (String::new(), 0)
+                None => (String::new(), 0),
             };
 
             match field.text().await {
