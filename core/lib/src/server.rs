@@ -85,8 +85,9 @@ async fn hyper_service_fn(
             let _req = match Request::from_hyp(&rocket, &h_parts, Some(conn)) {
                 Ok(mut req) => {
                     // Convert into Rocket `Data`, dispatch request, write response.
-                    let span = info_span!("request", "{}", TracingContext::new(&req));
-                    async {
+		    let tc = TracingContext::new(&req);		    
+                    let span = info_span!("req",ctx = %tc);		    
+                    async {			
                         let mut data = Data::from(&mut h_body);
                         let token = rocket.preprocess_request(&mut req, &mut data).await;
                         let response = rocket.dispatch(token, &mut req, data).await;

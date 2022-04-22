@@ -12,7 +12,7 @@ impl TracingContext {
             return Self(header.to_string());
         }
         Self("none".to_string())
-    }
+    }    
 }
 
 impl fmt::Display for TracingContext {
