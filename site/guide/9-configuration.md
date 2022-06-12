@@ -17,21 +17,25 @@ is configured with. This means that no matter which configuration provider
 Rocket is asked to use, it must be able to read the following configuration
 values:
 
-| key            | kind              | description                                     | debug/release default   |
-|----------------|-------------------|-------------------------------------------------|-------------------------|
-| `address`      | `IpAddr`          | IP address to serve on                          | `127.0.0.1`             |
-| `port`         | `u16`             | Port to serve on.                               | `8000`                  |
-| `workers`      | `usize`           | Number of threads to use for executing futures. | cpu core count          |
-| `ident`        | `string`, `false` | If and how to identify via the `Server` header. | `"Rocket"`              |
-| `keep_alive`   | `u32`             | Keep-alive timeout seconds; disabled when `0`.  | `5`                     |
-| `log_level`    | [`LogLevel`]      | Max level to log. (off/normal/debug/critical)   | `normal`/`critical`     |
-| `cli_colors`   | `bool`            | Whether to use colors and emoji when logging.   | `true`                  |
-| `secret_key`   | [`SecretKey`]     | Secret key for signing and encrypting values.   | `None`                  |
-| `tls`          | [`TlsConfig`]     | TLS configuration, if any.                      | `None`                  |
-| `limits`       | [`Limits`]        | Streaming read size limits.                     | [`Limits::default()`]   |
-| `limits.$name` | `&str`/`uint`     | Read limit for `$name`.                         | forms = "32KiB"         |
-| `ctrlc`        | `bool`            | Whether `ctrl-c` initiates a server shutdown.   | `true`                  |
-| `shutdown`     | [`Shutdown`]      | Graceful shutdown configuration.                | [`Shutdown::default()`] |
+| key             | kind              | description                                     | debug/release default   |
+|-----------------|-------------------|-------------------------------------------------|-------------------------|
+| `address`       | `IpAddr`          | IP address to serve on                          | `127.0.0.1`             |
+| `port`          | `u16`             | Port to serve on.                               | `8000`                  |
+| `workers`*      | `usize`           | Number of threads to use for executing futures. | cpu core count          |
+| `max_blocking`* | `usize`           | Limit on threads to start for blocking tasks.   | `512`                   |
+| `ident`         | `string`, `false` | If and how to identify via the `Server` header. | `"Rocket"`              |
+| `keep_alive`    | `u32`             | Keep-alive timeout seconds; disabled when `0`.  | `5`                     |
+| `log_level`     | [`LogLevel`]      | Max level to log. (off/normal/debug/critical)   | `normal`/`critical`     |
+| `cli_colors`    | `bool`            | Whether to use colors and emoji when logging.   | `true`                  |
+| `secret_key`    | [`SecretKey`]     | Secret key for signing and encrypting values.   | `None`                  |
+| `tls`           | [`TlsConfig`]     | TLS configuration, if any.                      | `None`                  |
+| `limits`        | [`Limits`]        | Streaming read size limits.                     | [`Limits::default()`]   |
+| `limits.$name`  | `&str`/`uint`     | Read limit for `$name`.                         | form = "32KiB"          |
+| `ctrlc`         | `bool`            | Whether `ctrl-c` initiates a server shutdown.   | `true`                  |
+| `shutdown`*     | [`Shutdown`]      | Graceful shutdown configuration.                | [`Shutdown::default()`] |
+
+<small>* Note: the `workers`, `max_blocking`, and `shutdown.force` configuration
+parameters are only read from the [default provider](#default-provider).</small>
 
 ### Profiles
 
@@ -106,12 +110,12 @@ file might look like:
 ## defaults for _all_ profiles
 [default]
 address = "0.0.0.0"
-limits = { forms = "64 kB", json = "1 MiB" }
+limits = { form = "64 kB", json = "1 MiB" }
 
 ## set only when compiled in debug mode, i.e, `cargo build`
 [debug]
 port = 8000
-## only the `json` key from `default` will be overridden; `forms` will remain
+## only the `json` key from `default` will be overridden; `form` will remain
 limits = { json = "10MiB" }
 
 ## set only when the `nyc` profile is selected
@@ -135,6 +139,7 @@ sensible.
 address = "127.0.0.1"
 port = 8000
 workers = 16
+max_blocking = 512
 keep_alive = 5
 ident = "Rocket"
 log_level = "normal"
@@ -144,7 +149,7 @@ cli_colors = true
 secret_key = "hPRYyVRiMyxpw5sBB1XeCMN1kFsDCqKvBi2QJxBVHQk="
 
 [default.limits]
-forms = "64 kB"
+form = "64 kB"
 json = "1 MiB"
 msgpack = "2 MiB"
 "file/jpg" = "5 MiB"
@@ -179,8 +184,10 @@ ROCKET_IDENT=Rocket
 ROCKET_IDENT="Hello Rocket"
 ROCKET_IDENT=false
 ROCKET_TLS={certs="abc",key="foo/bar"}
-ROCKET_LIMITS={forms="64 KiB"}
+ROCKET_LIMITS={form="64 KiB"}
 ```
+
+## Configuration Parameters
 
 ### Secret Key
 
@@ -223,7 +230,7 @@ Security). To enable TLS support:
 
    ```toml,ignore
    [dependencies]
-   rocket = { version = "0.5.0-rc.1", features = ["tls"] }
+   rocket = { version = "0.5.0-rc.2", features = ["tls"] }
    ```
 
   2. Configure a TLS certificate chain and private key via the `tls.key` and
@@ -288,7 +295,7 @@ enabled and support configured via the `tls.mutual` config parameter:
 
    ```toml,ignore
    [dependencies]
-   rocket = { version = "0.5.0-rc.1", features = ["mtls"] }
+   rocket = { version = "0.5.0-rc.2", features = ["mtls"] }
    ```
 
    This implicitly enables the `tls` feature.
@@ -322,11 +329,26 @@ Rocket reports if TLS and/or mTLS are enabled at launch time:
    >> tls: enabled w/mtls
 ```
 
+Once mutual TLS is properly enabled, the [`mtls::Certificate`] request guard can
+be used to retrieve validated, verified client certificates:
+
+```rust
+# #[macro_use] extern crate rocket;
+use rocket::mtls::Certificate;
+
+#[get("/auth")]
+fn auth(cert: Certificate<'_>) {
+    // This handler only runs when a valid certificate was presented.
+}
+```
+
 The [TLS example](@example/tls) illustrates a fully configured TLS server with
 mutual TLS.
 
 ! warning: Rocket's built-in TLS supports only TLS 1.2 and 1.3. This may not be
   suitable for production use.
+
+[`mtls::Certificate`]: @api/rocket/mtls/struct.Certificate.html
 
 ### Workers
 
@@ -337,6 +359,21 @@ configuration value cannot be reconfigured or be configured from sources other
 than those provided by [`Config::figment()`]. In other words, only the values
 set by the `ROCKET_WORKERS` environment variable or in the `workers` property of
 `Rocket.toml` will be considered - all other `workers` values are ignored.
+
+The `max_blocking` parameter sets an upper limit on the number of threads the
+underlying `async` runtime will spawn to execute potentially blocking,
+synchronous tasks via [`spawn_blocking`] or equivalent. Similar to the `workers`
+parameter, `max_blocking` cannot be reconfigured or be configured from sources
+other than those provided by [`Config::figment()`]. Unlike `workers`, threads
+corresponding to `max_blocking` are not always active and will exit if idling.
+In general, the default value of `512` should not be changed unless physical or
+virtual resources are scarce. Rocket only executes work on blocking threads when
+required such as when performing file system I/O via [`TempFile`] or wrapping
+synchronous work via [`rocket_sync_db_pools`].
+
+[`spawn_blocking`]: @tokio/task/fn.spawn_blocking.html
+[`TempFile`]: @api/rocket/fs/enum.TempFile.html
+[`rocket_sync_db_pools`]: @api/rocket_sync_db_pools/index.html
 
 ## Extracting Values
 
@@ -354,6 +391,7 @@ fn rocket() -> _ {
     let figment = rocket.figment();
 
     #[derive(Deserialize)]
+    #[serde(crate = "rocket::serde")]
     struct Config {
         port: u16,
         custom: Vec<String>,
@@ -382,6 +420,7 @@ Because it is common to store configuration in managed state, Rocket provides an
 # #[macro_use] extern crate rocket;
 # use rocket::serde::Deserialize;
 # #[derive(Deserialize)]
+# #[serde(crate = "rocket::serde")]
 # struct Config {
 #     port: u16,
 #     custom: Vec<String>,
@@ -457,6 +496,7 @@ use rocket::fairing::AdHoc;
 use figment::{Figment, Profile, providers::{Format, Toml, Serialized, Env}};
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
 struct Config {
     app_value: usize,
     /* and so on.. */

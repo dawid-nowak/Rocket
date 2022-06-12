@@ -1,4 +1,3 @@
-use std::array;
 use std::borrow::Cow;
 
 use tokio::io::AsyncRead;
@@ -337,7 +336,7 @@ impl Event {
             Some(RawLinedEvent::raw("")),
         ];
 
-        stream::iter(array::IntoIter::new(events)).filter_map(ready)
+        stream::iter(events).filter_map(ready)
     }
 }
 
@@ -525,7 +524,7 @@ impl<S: Stream<Item = Event>> EventStream<S> {
 
         self.heartbeat
             .map(|beat| IntervalStream::new(interval(beat)))
-            .map(|stream| stream.map(|_| RawLinedEvent::raw(":\n")))
+            .map(|stream| stream.map(|_| RawLinedEvent::raw(":")))
     }
 
     fn into_stream(self) -> impl Stream<Item = RawLinedEvent> {
@@ -763,7 +762,7 @@ mod sse_tests {
         use futures::future::ready;
         use futures::stream::{once, iter, StreamExt};
 
-        const HEARTBEAT: &str = ":\n\n";
+        const HEARTBEAT: &str = ":\n";
 
         // Set a heartbeat interval of 250ms. Send nothing for 600ms. We should
         // get 2 or 3 heartbeats, the latter if one is sent eagerly. Maybe 4.
@@ -778,29 +777,30 @@ mod sse_tests {
         assert!(heartbeats >= 2 && heartbeats <= 4, "got {} beat(s)", heartbeats);
 
         let stream = EventStream! {
-            time::sleep(Duration::from_millis(200)).await;
+            time::sleep(Duration::from_millis(250)).await;
             yield Event::data("foo");
-            time::sleep(Duration::from_millis(200)).await;
+            time::sleep(Duration::from_millis(250)).await;
             yield Event::data("bar");
         };
 
-        let string = stream.heartbeat(Duration::from_millis(300)).into_string();
+        // We expect: foo\n\n [heartbeat] bar\n\n [maybe beartbeat].
+        let string = stream.heartbeat(Duration::from_millis(350)).into_string();
         let heartbeats = string.matches(HEARTBEAT).count();
         assert!(heartbeats >= 1 && heartbeats <= 3, "got {} beat(s)", heartbeats);
-        assert!(string.contains("data:foo\n\n"));
-        assert!(string.contains("data:bar\n\n"));
+        assert!(string.contains("data:foo\n\n"), "string = {:?}", string);
+        assert!(string.contains("data:bar\n\n"), "string = {:?}", string);
 
         // We shouldn't send a heartbeat if a message is immediately available.
         let stream = EventStream::from(once(ready(Event::data("hello"))));
         let string = stream.heartbeat(Duration::from_secs(1)).into_string();
-        assert_eq!(string, "data:hello\n\n");
+        assert_eq!(string, "data:hello\n\n", "string = {:?}", string);
 
         // It's okay if we do it with two, though.
         let stream = EventStream::from(iter(vec![Event::data("a"), Event::data("b")]));
         let string = stream.heartbeat(Duration::from_secs(1)).into_string();
         let heartbeats = string.matches(HEARTBEAT).count();
         assert!(heartbeats <= 1);
-        assert!(string.contains("data:a\n\n"));
-        assert!(string.contains("data:b\n\n"));
+        assert!(string.contains("data:a\n\n"), "string = {:?}", string);
+        assert!(string.contains("data:b\n\n"), "string = {:?}", string);
     }
 }

@@ -58,10 +58,10 @@ use crate::config::SecretKey;
 pub struct Config {
     /// The selected profile. **(default: _debug_ `debug` / _release_ `release`)**
     ///
-    /// **Note:** This field is never serialized nor deserialized. When a
+    /// _**Note:** This field is never serialized nor deserialized. When a
     /// `Config` is merged into a `Figment` as a `Provider`, this profile is
     /// selected on the `Figment`. When a `Config` is extracted, this field is
-    /// set to the extracting Figment's selected `Profile`.
+    /// set to the extracting Figment's selected `Profile`._
     #[serde(skip)]
     pub profile: Profile,
     /// IP address to serve on. **(default: `127.0.0.1`)**
@@ -69,7 +69,12 @@ pub struct Config {
     /// Port to serve on. **(default: `8000`)**
     pub port: u16,
     /// Number of threads to use for executing futures. **(default: `num_cores`)**
+    ///
+    /// _**Note:** Rocket only reads this value from sources in the [default
+    /// provider](Config::figment())._
     pub workers: usize,
+    /// Limit on threads to start for blocking tasks. **(default: `512`)**
+    pub max_blocking: usize,
     /// How, if at all, to identify the server via the `Server` header.
     /// **(default: `"Rocket"`)**
     pub ident: Ident,
@@ -87,8 +92,8 @@ pub struct Config {
     pub tls: Option<TlsConfig>,
     /// The secret key for signing and encrypting. **(default: `0`)**
     ///
-    /// **Note:** This field _always_ serializes as a 256-bit array of `0`s to
-    /// aid in preventing leakage of the secret key.
+    /// _**Note:** This field _always_ serializes as a 256-bit array of `0`s to
+    /// aid in preventing leakage of the secret key._
     #[cfg(feature = "secrets")]
     #[cfg_attr(nightly, doc(cfg(feature = "secrets")))]
     #[serde(serialize_with = "SecretKey::serialize_zero")]
@@ -167,6 +172,7 @@ impl Config {
             address: Ipv4Addr::new(127, 0, 0, 1).into(),
             port: 8000,
             workers: num_cpus::get(),
+            max_blocking: 512,
             ident: Ident::default(),
             limits: Limits::default(),
             temp_dir: std::env::temp_dir().into(),
@@ -355,9 +361,11 @@ impl Config {
         launch_info_!("address: {}", bold(&self.address));
         launch_info_!("port: {}", bold(&self.port));
         launch_info_!("workers: {}", bold(self.workers));
+        launch_info_!("max blocking threads: {}", bold(self.max_blocking));
         launch_info_!("ident: {}", bold(&self.ident));
         launch_info_!("limits: {}", bold(&self.limits));
         launch_info_!("temp dir: {}", bold(&self.temp_dir.relative().display()));
+        launch_info_!("http/2: {}", bold(cfg!(feature = "http2")));
 
         match self.keep_alive {
             0 => launch_info_!("keep-alive: {}", bold("disabled")),
@@ -446,6 +454,9 @@ impl Config {
 
     /// The stringy parameter name for setting/extracting [`Config::workers`].
     pub const WORKERS: &'static str = "workers";
+
+    /// The stringy parameter name for setting/extracting [`Config::max_blocking`].
+    pub const MAX_BLOCKING: &'static str = "max_blocking";
 
     /// The stringy parameter name for setting/extracting [`Config::keep_alive`].
     pub const KEEP_ALIVE: &'static str = "keep_alive";

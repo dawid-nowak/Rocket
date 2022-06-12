@@ -63,14 +63,14 @@ impl<T: Clone> IntoCollection<T> for &[T] {
 impl<T, const N: usize> IntoCollection<T> for [T; N] {
     #[inline(always)]
     fn into_collection<A: Array<Item=T>>(self) -> SmallVec<A> {
-        std::array::IntoIter::new(self).collect()
+        self.into_iter().collect()
     }
 
     #[inline]
     fn mapped<U, F, A: Array<Item=U>>(self, f: F) -> SmallVec<A>
         where F: FnMut(T) -> U
     {
-        std::array::IntoIter::new(self).map(f).collect()
+        self.into_iter().map(f).collect()
     }
 }
 
