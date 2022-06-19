@@ -1,5 +1,5 @@
 use crate::catcher::Catcher;
-use crate::route::{Color, Route};
+use crate::route::{Route, Color};
 
 use crate::http::{MediaType, Status};
 use crate::request::Request;
@@ -145,11 +145,7 @@ fn queries_match(route: &Route, req: &Request<'_>) -> bool {
         return true;
     }
 
-    let route_query_fields = route
-        .uri
-        .metadata
-        .static_query_fields
-        .iter()
+    let route_query_fields = route.uri.metadata.static_query_fields.iter()
         .map(|(k, v)| (k.as_str(), v.as_str()));
 
     for route_seg in route_query_fields {
@@ -173,9 +169,7 @@ fn queries_match(route: &Route, req: &Request<'_>) -> bool {
 
 fn formats_match(route: &Route, request: &Request<'_>) -> bool {
     if !route.method.supports_payload() {
-        route
-            .format
-            .as_ref()
+        route.format.as_ref()
             .and_then(|a| request.format().map(|b| (a, b)))
             .map(|(a, b)| a.collides_with(b))
             .unwrap_or(true)
@@ -183,12 +177,13 @@ fn formats_match(route: &Route, request: &Request<'_>) -> bool {
         match route.format.as_ref() {
             Some(a) => match request.format() {
                 Some(b) if b.specificity() == 2 => a.collides_with(b),
-                _ => false,
-            },
-            None => true,
+                _ => false
+            }
+            None => true
         }
     }
 }
+
 
 impl Collide for Catcher {
     /// Determines if two catchers are in conflict: there exists a request for
@@ -198,7 +193,8 @@ impl Collide for Catcher {
     ///  * Have the same base.
     ///  * Have the same status code or are both defaults.
     fn collides_with(&self, other: &Self) -> bool {
-        self.code == other.code && self.base.path().segments().eq(other.base.path().segments())
+        self.code == other.code
+            && self.base.path().segments().eq(other.base.path().segments())
     }
 }
 
@@ -210,11 +206,7 @@ impl Catcher {
     ///  * Its base is a prefix of the normalized/decoded `req.path()`.
     pub(crate) fn matches(&self, status: Status, req: &Request<'_>) -> bool {
         self.code.map_or(true, |code| code == status.code)
-            && self
-                .base
-                .path()
-                .segments()
-                .prefix_of(req.uri().path().segments())
+            && self.base.path().segments().prefix_of(req.uri().path().segments())
     }
 }
 
@@ -223,10 +215,10 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::http::uri::Origin;
-    use crate::http::{Accept, ContentType, MediaType, Method, Method::*};
+    use crate::route::{Route, dummy_handler};
     use crate::local::blocking::Client;
-    use crate::route::{dummy_handler, Route};
+    use crate::http::{Method, Method::*, MediaType, ContentType, Accept};
+    use crate::http::uri::Origin;
 
     type SimpleRoute = (Method, &'static str);
 
@@ -253,10 +245,7 @@ mod tests {
         assert!(unranked_collide("/a", "/a"));
         assert!(unranked_collide("/hello", "/hello"));
         assert!(unranked_collide("/hello", "/hello/"));
-        assert!(unranked_collide(
-            "/hello/there/how/ar",
-            "/hello/there/how/ar"
-        ));
+        assert!(unranked_collide("/hello/there/how/ar", "/hello/there/how/ar"));
         assert!(unranked_collide("/hello/there", "/hello/there/"));
     }
 
@@ -266,10 +255,7 @@ mod tests {
         assert!(unranked_collide("/<a>", "/b"));
         assert!(unranked_collide("/hello/<name>", "/hello/<person>"));
         assert!(unranked_collide("/hello/<name>/hi", "/hello/<person>/hi"));
-        assert!(unranked_collide(
-            "/hello/<name>/hi/there",
-            "/hello/<person>/hi/there"
-        ));
+        assert!(unranked_collide("/hello/<name>/hi/there", "/hello/<person>/hi/there"));
         assert!(unranked_collide("/<name>/hi/there", "/<person>/hi/there"));
         assert!(unranked_collide("/<name>/hi/there", "/dude/<name>/there"));
         assert!(unranked_collide("/<name>/<a>/<b>", "/<a>/<b>/<c>"));
@@ -423,9 +409,7 @@ mod tests {
     }
 
     fn r_mt_mt_collide<S1, S2>(m: Method, mt1: S1, mt2: S2) -> bool
-    where
-        S1: Into<Option<&'static str>>,
-        S2: Into<Option<&'static str>>,
+        where S1: Into<Option<&'static str>>, S2: Into<Option<&'static str>>
     {
         let mut route_a = Route::new(m, "/", dummy_handler);
         if let Some(mt_str) = mt1.into() {
@@ -487,9 +471,7 @@ mod tests {
     }
 
     fn req_route_mt_collide<S1, S2>(m: Method, mt1: S1, mt2: S2) -> bool
-    where
-        S1: Into<Option<&'static str>>,
-        S2: Into<Option<&'static str>>,
+        where S1: Into<Option<&'static str>>, S2: Into<Option<&'static str>>
     {
         let client = Client::debug_with(vec![]).expect("client");
         let mut req = client.req(m, "/");
@@ -511,24 +493,12 @@ mod tests {
 
     #[test]
     fn test_req_route_mt_collisions() {
-        assert!(req_route_mt_collide(
-            Post,
-            "application/json",
-            "application/json"
-        ));
-        assert!(req_route_mt_collide(
-            Post,
-            "application/json",
-            "application/*"
-        ));
+        assert!(req_route_mt_collide(Post, "application/json", "application/json"));
+        assert!(req_route_mt_collide(Post, "application/json", "application/*"));
         assert!(req_route_mt_collide(Post, "application/json", "*/json"));
         assert!(req_route_mt_collide(Post, "text/html", "*/*"));
 
-        assert!(req_route_mt_collide(
-            Get,
-            "application/json",
-            "application/json"
-        ));
+        assert!(req_route_mt_collide(Get, "application/json", "application/json"));
         assert!(req_route_mt_collide(Get, "text/html", "text/html"));
         assert!(req_route_mt_collide(Get, "text/html", "*/*"));
         assert!(req_route_mt_collide(Get, None, "*/*"));
@@ -548,16 +518,8 @@ mod tests {
         assert!(req_route_mt_collide(Get, None, "text/html"));
         assert!(req_route_mt_collide(Get, None, "application/json"));
 
-        assert!(req_route_mt_collide(
-            Get,
-            "text/html, text/plain",
-            "text/html"
-        ));
-        assert!(req_route_mt_collide(
-            Get,
-            "text/html; q=0.5, text/xml",
-            "text/xml"
-        ));
+        assert!(req_route_mt_collide(Get, "text/html, text/plain", "text/html"));
+        assert!(req_route_mt_collide(Get, "text/html; q=0.5, text/xml", "text/xml"));
 
         assert!(!req_route_mt_collide(Post, None, "text/html"));
         assert!(!req_route_mt_collide(Post, None, "text/*"));
@@ -620,10 +582,9 @@ mod tests {
         assert!(!req_route_path_match("/a/b", "/a/b?<a>&b&<rest..>"));
     }
 
+
     fn catchers_collide<A, B>(a: A, ap: &str, b: B, bp: &str) -> bool
-    where
-        A: Into<Option<u16>>,
-        B: Into<Option<u16>>,
+        where A: Into<Option<u16>>, B: Into<Option<u16>>
     {
         use crate::catcher::dummy_handler as handler;
 

@@ -117,7 +117,6 @@ function test_core() {
   FEATURES=(
     secrets
     tls
-    log
     mtls
     json
     msgpack

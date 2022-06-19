@@ -2,8 +2,8 @@ use std::ops::Deref;
 
 use ref_cast::RefCast;
 
-use crate::form::name::*;
 use crate::http::RawStr;
+use crate::form::name::*;
 
 /// A field name composed of keys.
 ///
@@ -218,7 +218,7 @@ impl AsRef<Name> for Name {
     }
 }
 
-impl Eq for Name {}
+impl Eq for Name { }
 
 impl std::hash::Hash for Name {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

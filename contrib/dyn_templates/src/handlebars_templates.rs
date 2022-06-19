@@ -5,7 +5,6 @@ use rocket::trace::{error,info};
 use crate::engine::Engine;
 pub use crate::handlebars::Handlebars;
 
-
 impl Engine for Handlebars<'static> {
     const EXT: &'static str = "hbs";
 

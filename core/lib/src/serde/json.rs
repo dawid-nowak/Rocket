@@ -24,17 +24,17 @@
 //! [`json()`]: crate::local::blocking::LocalRequest::json()
 //! [`into_json()`]: crate::local::blocking::LocalResponse::into_json()
 
+use std::{io, fmt, error};
 use std::ops::{Deref, DerefMut};
-use std::{error, fmt, io};
 
-use crate::data::{Data, FromData, Limits, Outcome};
+use crate::request::{Request, local_cache};
+use crate::data::{Limits, Data, FromData, Outcome};
+use crate::response::{self, Responder, content};
 use crate::form::prelude as form;
-use crate::http::uri::fmt::{Formatter as UriFormatter, FromUriParam, Query, UriDisplay};
+use crate::http::uri::fmt::{UriDisplay, FromUriParam, Query, Formatter as UriFormatter};
 use crate::http::Status;
-use crate::request::{local_cache, Request};
-use crate::response::{self, content, Responder};
 
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 
 #[doc(hidden)]
 pub use serde_json;
@@ -175,9 +175,7 @@ impl<T> Json<T> {
 
 impl<'r, T: Deserialize<'r>> Json<T> {
     fn from_str(s: &'r str) -> Result<Self, Error<'r>> {
-        serde_json::from_str(s)
-            .map(Json)
-            .map_err(|e| Error::Parse(s, e))
+        serde_json::from_str(s).map(Json).map_err(|e| Error::Parse(s, e))
     }
 
     async fn from_data(req: &'r Request<'_>, data: Data<'r>) -> Result<Self, Error<'r>> {
@@ -187,7 +185,7 @@ impl<'r, T: Deserialize<'r>> Json<T> {
             Ok(_) => {
                 let eof = io::ErrorKind::UnexpectedEof;
                 return Err(Error::Io(io::Error::new(eof, "data limit exceeded")));
-            }
+            },
             Err(e) => return Err(Error::Io(e)),
         };
 
@@ -204,11 +202,12 @@ impl<'r, T: Deserialize<'r>> FromData<'r> for Json<T> {
             Ok(value) => Outcome::Success(value),
             Err(Error::Io(e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
                 Outcome::Failure((Status::PayloadTooLarge, Error::Io(e)))
-            }
+            },
             Err(Error::Parse(s, e)) if e.classify() == serde_json::error::Category::Data => {
                 Outcome::Failure((Status::UnprocessableEntity, Error::Parse(s, e)))
-            }
+            },
             Err(e) => Outcome::Failure((Status::BadRequest, e)),
+
         }
     }
 }
@@ -218,10 +217,11 @@ impl<'r, T: Deserialize<'r>> FromData<'r> for Json<T> {
 /// fails, an `Err` of `Status::InternalServerError` is returned.
 impl<'r, T: Serialize> Responder<'r, 'static> for Json<T> {
     fn respond_to(self, req: &'r Request<'_>) -> response::Result<'static> {
-        let string = serde_json::to_string(&self.0).map_err(|e| {
-            error!("JSON failed to serialize: {:?}", e);
-            Status::InternalServerError
-        })?;
+        let string = serde_json::to_string(&self.0)
+            .map_err(|e| {
+                error!("JSON failed to serialize: {:?}", e);
+                Status::InternalServerError
+            })?;
 
         content::RawJson(string).respond_to(req)
     }
@@ -279,7 +279,7 @@ impl From<Error<'_>> for form::Error<'_> {
     fn from(e: Error<'_>) -> Self {
         match e {
             Error::Io(e) => e.into(),
-            Error::Parse(_, e) => form::Error::custom(e),
+            Error::Parse(_, e) => form::Error::custom(e)
         }
     }
 }
@@ -455,8 +455,7 @@ pub use serde_json::Value;
 /// type.
 #[inline(always)]
 pub fn from_slice<'a, T>(slice: &'a [u8]) -> Result<T, serde_json::error::Error>
-where
-    T: Deserialize<'a>,
+    where T: Deserialize<'a>,
 {
     serde_json::from_slice(slice)
 }
@@ -499,8 +498,7 @@ where
 /// type.
 #[inline(always)]
 pub fn from_str<'a, T>(string: &'a str) -> Result<T, serde_json::error::Error>
-where
-    T: Deserialize<'a>,
+    where T: Deserialize<'a>,
 {
     serde_json::from_str(string)
 }
@@ -537,8 +535,7 @@ where
 /// contains a map with non-string keys.
 #[inline(always)]
 pub fn to_string<T>(value: &T) -> Result<String, serde_json::error::Error>
-where
-    T: Serialize,
+    where T: Serialize
 {
     serde_json::to_string(value)
 }
@@ -577,8 +574,7 @@ where
 /// contains a map with non-string keys.
 #[inline(always)]
 pub fn to_pretty_string<T>(value: &T) -> Result<String, serde_json::error::Error>
-where
-    T: Serialize,
+    where T: Serialize
 {
     serde_json::to_string_pretty(value)
 }
@@ -617,8 +613,7 @@ where
 /// type.
 #[inline(always)]
 pub fn from_value<T>(value: Value) -> Result<T, serde_json::error::Error>
-where
-    T: crate::serde::DeserializeOwned,
+    where T: crate::serde::DeserializeOwned
 {
     serde_json::from_value(value)
 }
@@ -653,8 +648,7 @@ where
 /// or if `T` contains a map with non-string keys.
 #[inline(always)]
 pub fn to_value<T>(item: T) -> Result<Value, serde_json::error::Error>
-where
-    T: Serialize,
+    where T: Serialize
 {
     serde_json::to_value(item)
 }

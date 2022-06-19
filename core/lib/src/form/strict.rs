@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::form::prelude::*;
-use crate::http::uri::fmt::{FromUriParam, Query};
+use crate::http::uri::fmt::{Query, FromUriParam};
 
 /// A form guard for parsing form types strictly.
 ///
@@ -94,10 +94,7 @@ impl<'v, T: FromForm<'v>> FromForm<'v> for Strict<T> {
 
     #[inline(always)]
     fn init(opts: Options) -> Self::Context {
-        T::init(Options {
-            strict: true,
-            ..opts
-        })
+        T::init(Options { strict: true, ..opts })
     }
 
     #[inline(always)]

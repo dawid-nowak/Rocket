@@ -13,7 +13,6 @@ use rocket::request::FlashMessage;
 use rocket::response::{Flash, Redirect};
 use rocket::serde::Serialize;
 use rocket::form::Form;
-use rocket::trace::error;
 use rocket::fs::{FileServer, relative};
 
 use rocket_dyn_templates::Template;

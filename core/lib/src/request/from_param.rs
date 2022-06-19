@@ -1,7 +1,7 @@
-use std::path::PathBuf;
 use std::str::FromStr;
+use std::path::PathBuf;
 
-use crate::http::uri::{error::PathError, fmt::Path, Segments};
+use crate::http::uri::{Segments, error::PathError, fmt::Path};
 
 /// Trait to convert a dynamic path segment string to a concrete value.
 ///
@@ -343,7 +343,7 @@ impl<'r, T: FromSegments<'r>> FromSegments<'r> for Option<T> {
     fn from_segments(segments: Segments<'r, Path>) -> Result<Option<T>, Self::Error> {
         match T::from_segments(segments) {
             Ok(val) => Ok(Some(val)),
-            Err(_) => Ok(None),
+            Err(_) => Ok(None)
         }
     }
 }

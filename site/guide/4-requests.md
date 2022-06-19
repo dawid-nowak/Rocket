@@ -882,10 +882,10 @@ struct MyForm<'v> {
 # rocket_guide_tests::assert_form_parses_ok!(MyForm, "");
 ```
 
-The default can be overridden or unset using the `#[field(default = expr)]`
-field attribute. If `expr` is not literally `None`, the parameter sets the
-default value of the field to be `expr.into()`. If `expr` _is_ `None`, the
-parameter _unsets_ the default value of the field, if any.
+The default can be overridden or unset using the `#[field(default = expr)` field
+attribute. If `expr` is not literally `None`, the parameter sets the default
+value of the field to be `expr.into()`. If `expr` _is_ `None`, the parameter
+_unsets_ the default value of the field, if any.
 
 ```rust
 # use rocket::form::FromForm;
@@ -1028,8 +1028,8 @@ you might write:
 
 ```rust
 # #[macro_use] extern crate rocket;
+extern crate time;
 
-use rocket::time::Date;
 use rocket::form::{self, Error};
 
 #[derive(FromForm)]
@@ -1038,10 +1038,10 @@ struct CreditCard {
     number: u64,
     #[field(validate = range(..9999))]
     cvv: u16,
-    expiration: Date,
+    expiration: time::Date,
 }
 
-fn luhn<'v>(number: &u64, cvv: u16, exp: &Date) -> form::Result<'v, ()> {
+fn luhn<'v>(number: &u64, cvv: u16, exp: &time::Date) -> form::Result<'v, ()> {
     # let valid = false;
     if !valid {
         Err(Error::validation("invalid credit card number"))?;

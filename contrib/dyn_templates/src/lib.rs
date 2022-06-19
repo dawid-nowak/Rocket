@@ -77,10 +77,10 @@
 //! | Engine       | Version | Extension |
 //! |--------------|---------|-----------|
 //! | [Tera]       | 1       | `.tera`   |
-//! | [Handlebars] | 4       | `.hbs`    |
+//! | [Handlebars] | 3       | `.hbs`    |
 //!
 //! [Tera]: https://docs.rs/crate/tera/1
-//! [Handlebars]: https://docs.rs/crate/handlebars/4
+//! [Handlebars]: https://docs.rs/crate/handlebars/3
 //!
 //! Any file that ends with one of these extension will be discovered and
 //! rendered with the corresponding templating engine. The _name_ of the
@@ -132,6 +132,8 @@
 #![doc(html_root_url = "https://api.rocket.rs/v0.5-rc/rocket_dyn_templates")]
 #![doc(html_favicon_url = "https://rocket.rs/images/favicon.ico")]
 #![doc(html_logo_url = "https://rocket.rs/images/logo-boxed.png")]
+
+#[macro_use] extern crate rocket;
 
 #[cfg(not(any(feature = "tera", feature = "handlebars")))]
 compile_error!("at least one of \"tera\" or \"handlebars\" features must be enabled");

@@ -51,14 +51,14 @@
 
 use std::any::Any;
 
-use crate::{Build, Data, Orbit, Request, Response, Rocket};
+use crate::{Rocket, Request, Response, Data, Build, Orbit};
 
-mod ad_hoc;
 mod fairings;
+mod ad_hoc;
 mod info_kind;
 
-pub use self::ad_hoc::AdHoc;
 pub(crate) use self::fairings::Fairings;
+pub use self::ad_hoc::AdHoc;
 pub use self::info_kind::{Info, Kind};
 
 /// A type alias for the return `Result` type of [`Fairing::on_ignite()`].

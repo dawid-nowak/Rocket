@@ -1,7 +1,6 @@
 use rocket::{Rocket, Build, futures};
 use rocket::fairing::{self, AdHoc};
 use rocket::response::status::Created;
-use rocket::trace::error;
 use rocket::serde::{Serialize, Deserialize, json::Json};
 
 use rocket_db_pools::{sqlx, Database, Connection};

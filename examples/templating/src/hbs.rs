@@ -16,6 +16,8 @@ pub fn hello(name: &str) -> Template {
         title: "Hello",
         name: Some(name),
         items: vec!["One", "Two", "Three"],
+        // This special key tells handlebars which template is the parent.
+        parent: "hbs/layout",
     })
 }
 
@@ -60,6 +62,6 @@ pub fn customize(hbs: &mut Handlebars) {
         </section>
 
         {{/inline}}
-        {{> hbs/layout}}
+        {{~> (parent)~}}
     "#).expect("valid HBS template");
 }

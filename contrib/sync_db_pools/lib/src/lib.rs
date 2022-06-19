@@ -360,6 +360,7 @@
 #![doc(html_logo_url = "https://rocket.rs/images/logo-boxed.png")]
 
 #[doc(hidden)]
+#[macro_use]
 pub extern crate rocket;
 
 #[cfg(any(

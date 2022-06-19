@@ -8,7 +8,6 @@ use crate::engine::Engine;
 
 pub use crate::tera::{Context, Tera};
 
-
 impl Engine for Tera {
     const EXT: &'static str = "tera";
 

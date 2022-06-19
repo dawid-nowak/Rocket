@@ -1,7 +1,7 @@
 use std::io;
 use tokio::io::AsyncReadExt;
 
-use crate::{http::CookieJar, local::asynchronous, Response};
+use crate::{Response, local::asynchronous, http::CookieJar};
 
 use super::Client;
 
@@ -50,8 +50,8 @@ use super::Client;
 ///
 /// For more, see [the top-level documentation](../index.html#localresponse).
 pub struct LocalResponse<'c> {
-    pub(super) inner: asynchronous::LocalResponse<'c>,
-    pub(super) client: &'c Client,
+    pub(in super) inner: asynchronous::LocalResponse<'c>,
+    pub(in super) client: &'c Client,
 }
 
 impl LocalResponse<'_> {
@@ -73,25 +73,21 @@ impl LocalResponse<'_> {
 
     #[cfg(feature = "json")]
     fn _into_json<T: Send + 'static>(self) -> Option<T>
-    where
-        T: serde::de::DeserializeOwned,
+        where T: serde::de::DeserializeOwned
     {
         serde_json::from_reader(self).ok()
     }
 
     #[cfg(feature = "msgpack")]
     fn _into_msgpack<T: Send + 'static>(self) -> Option<T>
-    where
-        T: serde::de::DeserializeOwned,
+        where T: serde::de::DeserializeOwned
     {
         rmp_serde::from_read(self).ok()
     }
 
     // Generates the public API methods, which call the private methods above.
-    pub_response_impl!(
-        "# use rocket::local::blocking::Client;\n\
-        use rocket::local::blocking::LocalResponse;"
-    );
+    pub_response_impl!("# use rocket::local::blocking::Client;\n\
+        use rocket::local::blocking::LocalResponse;");
 }
 
 impl io::Read for LocalResponse<'_> {

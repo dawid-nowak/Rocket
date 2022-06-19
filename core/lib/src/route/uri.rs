@@ -1,9 +1,9 @@
-use std::borrow::Cow;
 use std::fmt;
+use std::borrow::Cow;
 
-use crate::form::ValueField;
-use crate::http::ext::IntoOwned;
 use crate::http::uri::{self, Origin};
+use crate::http::ext::IntoOwned;
+use crate::form::ValueField;
 use crate::route::Segment;
 
 /// A route URI which is matched against requests.
@@ -123,19 +123,12 @@ impl<'a> RouteUri<'a> {
         let source = origin.to_string().into();
         let metadata = Metadata::from(&base, &origin);
 
-        Ok(RouteUri {
-            source,
-            base,
-            unmounted_origin,
-            origin,
-            metadata,
-        })
+        Ok(RouteUri { source, base, unmounted_origin, origin, metadata })
     }
 
     /// Create a new `RouteUri`.
     ///
     /// Panics if  `base` or `uri` cannot be parsed as `Origin`s.
-    #[track_caller]
     pub(crate) fn new(base: &str, uri: &str) -> RouteUri<'static> {
         Self::try_new(base, uri).expect("Expected valid URIs")
     }
@@ -256,26 +249,19 @@ impl<'a> RouteUri<'a> {
 
 impl Metadata {
     fn from(base: &Origin<'_>, origin: &Origin<'_>) -> Self {
-        let base_segs = base
-            .path()
-            .raw_segments()
+        let base_segs = base.path().raw_segments()
             .map(Segment::from)
             .collect::<Vec<_>>();
 
-        let path_segs = origin
-            .path()
-            .raw_segments()
+        let path_segs = origin.path().raw_segments()
             .map(Segment::from)
             .collect::<Vec<_>>();
 
-        let query_segs = origin
-            .query()
+        let query_segs = origin.query()
             .map(|q| q.raw_segments().map(Segment::from).collect::<Vec<_>>())
             .unwrap_or_default();
 
-        let static_query_fields = query_segs
-            .iter()
-            .filter(|s| !s.dynamic)
+        let static_query_fields = query_segs.iter().filter(|s| !s.dynamic)
             .map(|s| ValueField::parse(&s.value))
             .map(|f| (f.name.source().to_string(), f.value.to_string()))
             .collect();
@@ -285,7 +271,7 @@ impl Metadata {
         let path_color = match (static_path, wild_path) {
             (true, _) => Color::Static,
             (_, true) => Color::Wild,
-            (_, _) => Color::Partial,
+            (_, _) => Color::Partial
         };
 
         let query_color = (!query_segs.is_empty()).then(|| {
@@ -294,20 +280,15 @@ impl Metadata {
             match (static_query, wild_query) {
                 (true, _) => Color::Static,
                 (_, true) => Color::Wild,
-                (_, _) => Color::Partial,
+                (_, _) => Color::Partial
             }
         });
 
         let trailing_path = path_segs.last().map_or(false, |p| p.trailing);
 
         Metadata {
-            base_segs,
-            path_segs,
-            query_segs,
-            static_query_fields,
-            path_color,
-            query_color,
-            trailing_path,
+            base_segs, path_segs, query_segs, static_query_fields,
+            path_color, query_color, trailing_path,
         }
     }
 }
@@ -338,19 +319,13 @@ impl fmt::Debug for RouteUri<'_> {
 }
 
 impl<'a, 'b> PartialEq<Origin<'b>> for RouteUri<'a> {
-    fn eq(&self, other: &Origin<'b>) -> bool {
-        &self.origin == other
-    }
+    fn eq(&self, other: &Origin<'b>) -> bool { &self.origin == other }
 }
 
 impl PartialEq<str> for RouteUri<'_> {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
+    fn eq(&self, other: &str) -> bool { self.as_str() == other }
 }
 
 impl PartialEq<&str> for RouteUri<'_> {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
+    fn eq(&self, other: &&str) -> bool { self.as_str() == *other }
 }

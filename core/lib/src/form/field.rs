@@ -1,10 +1,7 @@
-use crate::form::{
-    error::{Entity, Error, ErrorKind},
-    name::NameView,
-};
-use crate::fs::FileName;
+use crate::form::{name::NameView, error::{Error, ErrorKind, Entity}};
 use crate::http::{ContentType, RawStr};
-use crate::{Data, Request};
+use crate::{Request, Data};
+use crate::fs::FileName;
 
 /// A form field with a string value.
 ///
@@ -219,10 +216,7 @@ impl<'v> DataField<'v, '_> {
 
 impl<'a> From<(&'a str, &'a str)> for ValueField<'a> {
     fn from((name, value): (&'a str, &'a str)) -> Self {
-        ValueField {
-            name: NameView::new(name),
-            value,
-        }
+        ValueField { name: NameView::new(name), value }
     }
 }
 

@@ -1,10 +1,10 @@
 //! Types representing various errors that can occur in a Rocket application.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{fmt, io};
+use std::{io, fmt};
+use std::sync::atomic::{Ordering, AtomicBool};
 
-use figment::Profile;
 use yansi::Paint;
+use figment::Profile;
 
 /// An error that occurs during launch.
 ///
@@ -59,7 +59,7 @@ use yansi::Paint;
 ///   2. You want to display your own error messages.
 pub struct Error {
     handled: AtomicBool,
-    kind: ErrorKind,
+    kind: ErrorKind
 }
 
 /// The kind error that occurred.
@@ -100,10 +100,7 @@ impl From<ErrorKind> for Error {
 impl Error {
     #[inline(always)]
     pub(crate) fn new(kind: ErrorKind) -> Error {
-        Error {
-            handled: AtomicBool::new(false),
-            kind,
-        }
+        Error { handled: AtomicBool::new(false), kind }
     }
 
     #[inline(always)]
@@ -177,7 +174,7 @@ impl Drop for Error {
     fn drop(&mut self) {
         // Don't panic if the message has been seen. Don't double-panic.
         if self.was_handled() || std::thread::panicking() {
-            return;
+            return
         }
 
         match self.kind() {

@@ -1,5 +1,4 @@
-#[macro_use]
-extern crate rocket;
+#[macro_use] extern crate rocket;
 
 const RESPONSE_STRING: &'static str = "This is the body. Hello, world!";
 
@@ -17,12 +16,12 @@ fn auto() -> &'static str {
 // whether they are auto-handled or not.
 mod fairing_before_head_strip {
     use super::*;
-    use std::io::Cursor;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::io::Cursor;
 
     use rocket::fairing::AdHoc;
-    use rocket::http::{Method, Status};
     use rocket::local::blocking::Client;
+    use rocket::http::{Method, Status};
 
     #[test]
     fn not_auto_handled() {

@@ -1,9 +1,9 @@
-use std::borrow::Cow;
 use std::{fmt, str};
+use std::borrow::Cow;
 
 use tokio::io::{AsyncRead, AsyncSeek};
 
-use crate::http::{ContentType, Cookie, Header, HeaderMap, Status};
+use crate::http::{Header, HeaderMap, Status, ContentType, Cookie};
 use crate::response::Body;
 
 /// Builder for the [`Response`] type.
@@ -83,7 +83,9 @@ impl<'r> Builder<'r> {
     /// ```
     #[inline(always)]
     pub fn new(base: Response<'r>) -> Builder<'r> {
-        Builder { response: base }
+        Builder {
+            response: base,
+        }
     }
 
     /// Sets the status of the `Response` being built to `status`.
@@ -128,8 +130,7 @@ impl<'r> Builder<'r> {
     /// ```
     #[inline(always)]
     pub fn header<'h: 'r, H>(&mut self, header: H) -> &mut Builder<'r>
-    where
-        H: Into<Header<'h>>,
+        where H: Into<Header<'h>>
     {
         self.response.set_header(header);
         self
@@ -160,8 +161,7 @@ impl<'r> Builder<'r> {
     /// ```
     #[inline(always)]
     pub fn header_adjoin<'h: 'r, H>(&mut self, header: H) -> &mut Builder<'r>
-    where
-        H: Into<Header<'h>>,
+        where H: Into<Header<'h>>
     {
         self.response.adjoin_header(header);
         self
@@ -186,11 +186,7 @@ impl<'r> Builder<'r> {
     /// ```
     #[inline(always)]
     pub fn raw_header<'a, 'b, N, V>(&mut self, name: N, value: V) -> &mut Builder<'r>
-    where
-        N: Into<Cow<'a, str>>,
-        V: Into<Cow<'b, str>>,
-        'a: 'r,
-        'b: 'r,
+        where N: Into<Cow<'a, str>>, V: Into<Cow<'b, str>>, 'a: 'r, 'b: 'r
     {
         self.response.set_raw_header(name, value);
         self
@@ -216,11 +212,7 @@ impl<'r> Builder<'r> {
     /// ```
     #[inline(always)]
     pub fn raw_header_adjoin<'a, 'b, N, V>(&mut self, name: N, value: V) -> &mut Builder<'r>
-    where
-        N: Into<Cow<'a, str>>,
-        V: Into<Cow<'b, str>>,
-        'a: 'r,
-        'b: 'r,
+        where N: Into<Cow<'a, str>>, V: Into<Cow<'b, str>>, 'a: 'r, 'b: 'r
     {
         self.response.adjoin_raw_header(name, value);
         self
@@ -242,9 +234,8 @@ impl<'r> Builder<'r> {
     ///     .finalize();
     /// ```
     pub fn sized_body<B, S>(&mut self, size: S, body: B) -> &mut Builder<'r>
-    where
-        B: AsyncRead + AsyncSeek + Send + 'r,
-        S: Into<Option<usize>>,
+        where B: AsyncRead + AsyncSeek + Send + 'r,
+              S: Into<Option<usize>>
     {
         self.response.set_sized_body(size, body);
         self
@@ -264,8 +255,7 @@ impl<'r> Builder<'r> {
     /// ```
     #[inline(always)]
     pub fn streamed_body<B>(&mut self, body: B) -> &mut Builder<'r>
-    where
-        B: AsyncRead + Send + 'r,
+        where B: AsyncRead + Send + 'r
     {
         self.response.set_streamed_body(body);
         self
@@ -530,9 +520,7 @@ impl<'r> Response<'r> {
     /// ```
     #[inline(always)]
     pub fn content_type(&self) -> Option<ContentType> {
-        self.headers()
-            .get_one("Content-Type")
-            .and_then(|v| v.parse().ok())
+        self.headers().get_one("Content-Type").and_then(|v| v.parse().ok())
     }
 
     /// Returns an iterator over the cookies in `self` as identified by the
@@ -686,9 +674,7 @@ impl<'r> Response<'r> {
     /// ```
     #[inline(always)]
     pub fn adjoin_raw_header<'a: 'r, 'b: 'r, N, V>(&mut self, name: N, value: V)
-    where
-        N: Into<Cow<'a, str>>,
-        V: Into<Cow<'b, str>>,
+        where N: Into<Cow<'a, str>>, V: Into<Cow<'b, str>>
     {
         self.adjoin_header(Header::new(name, value));
     }
@@ -790,9 +776,8 @@ impl<'r> Response<'r> {
     /// # assert!(o.is_ok());
     /// ```
     pub fn set_sized_body<B, S>(&mut self, size: S, body: B)
-    where
-        B: AsyncRead + AsyncSeek + Send + 'r,
-        S: Into<Option<usize>>,
+        where B: AsyncRead + AsyncSeek + Send + 'r,
+              S: Into<Option<usize>>
     {
         self.body = Body::with_sized(body, size.into());
     }
@@ -819,8 +804,7 @@ impl<'r> Response<'r> {
     /// ```
     #[inline(always)]
     pub fn set_streamed_body<B>(&mut self, body: B)
-    where
-        B: AsyncRead + Send + 'r,
+        where B: AsyncRead + Send + 'r
     {
         self.body = Body::with_unsized(body);
     }

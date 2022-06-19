@@ -1,13 +1,13 @@
-use std::any::type_name;
 use std::fmt;
 use std::ops::Deref;
+use std::any::type_name;
 
 use ref_cast::RefCast;
 
-use crate::http::Status;
-use crate::outcome::Outcome;
+use crate::{Phase, Rocket, Ignite, Sentinel};
 use crate::request::{self, FromRequest, Request};
-use crate::{Ignite, Phase, Rocket, Sentinel};
+use crate::outcome::Outcome;
+use crate::http::Status;
 
 /// Request guard to retrieve managed state.
 ///

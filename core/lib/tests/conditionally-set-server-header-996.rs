@@ -1,5 +1,4 @@
-#[macro_use]
-extern crate rocket;
+#[macro_use] extern crate rocket;
 
 use rocket::http::Header;
 
@@ -12,7 +11,7 @@ fn do_not_overwrite() -> HeaderOnly {
 }
 
 #[get("/use_default")]
-fn use_default() {}
+fn use_default() { }
 
 mod conditionally_set_server_header {
     use super::*;
@@ -37,7 +36,8 @@ mod conditionally_set_server_header {
             ..rocket::Config::debug_default()
         };
 
-        let rocket = rocket::custom(config).mount("/", routes![do_not_overwrite, use_default]);
+        let rocket = rocket::custom(config)
+            .mount("/", routes![do_not_overwrite, use_default]);
 
         let client = Client::debug(rocket).unwrap();
 

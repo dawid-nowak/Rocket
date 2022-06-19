@@ -4,11 +4,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use state::Storage;
 use yansi::Paint;
 
+use crate::{Rocket, Request, Response, Orbit, Config};
 use crate::fairing::{Fairing, Info, Kind};
-use crate::http::{uncased::UncasedStr, Header};
-use crate::shield::*;
+use crate::http::{Header, uncased::UncasedStr};
 use crate::trace::PaintExt;
-use crate::{Config, Orbit, Request, Response, Rocket};
+use crate::shield::*;
 
 /// A [`Fairing`] that injects browser security and privacy headers into all
 /// outgoing responses.
@@ -175,7 +175,9 @@ impl Shield {
 
     fn headers(&self) -> &[Header<'static>] {
         self.rendered.get_or_set(|| {
-            let mut headers: Vec<_> = self.policies.values().map(|p| p.header()).collect();
+            let mut headers: Vec<_> = self.policies.values()
+                .map(|p| p.header())
+                .collect();
 
             if self.force_hsts.load(Ordering::Acquire) {
                 headers.push(Policy::header(&Hsts::default()));
@@ -208,13 +210,13 @@ impl Fairing for Shield {
             info!("{}{}:", Paint::emoji("🛡️ "), Paint::magenta("Shield"));
 
             for header in self.headers() {
-                warn!("{}: {}", header.name(), Paint::default(header.value()));
+                info!("{}: {}", header.name(), Paint::default(header.value()));
             }
 
             if force_hsts {
                 warn!("Detected TLS-enabled liftoff without enabling HSTS.");
                 warn!("Shield has enabled a default HSTS policy.");
-                warn!("To remove this warning, configure an HSTS policy.");
+                info!("To remove this warning, configure an HSTS policy.");
             }
         }
     }
@@ -226,7 +228,7 @@ impl Fairing for Shield {
             if response.headers().contains(header.name()) {
                 warn!("Shield: response contains a '{}' header.", header.name());
                 warn!("Refusing to overwrite existing header.");
-                continue;
+                continue
             }
 
             response.set_header(header.clone());

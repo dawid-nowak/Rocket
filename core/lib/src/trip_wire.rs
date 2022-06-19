@@ -1,10 +1,7 @@
 use std::fmt;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::{ops::Deref, pin::Pin, future::Future};
 use std::task::{Context, Poll};
-use std::{future::Future, ops::Deref, pin::Pin};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use tokio::sync::Notify;
 
@@ -33,7 +30,7 @@ impl Clone for TripWire {
     fn clone(&self) -> Self {
         TripWire {
             state: self.state.clone(),
-            event: None,
+            event: None
         }
     }
 }
@@ -93,7 +90,7 @@ impl TripWire {
         TripWire {
             state: Arc::new(State {
                 tripped: AtomicBool::new(false),
-                notify: Notify::new(),
+                notify: Notify::new()
             }),
             event: None,
         }
@@ -130,9 +127,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn no_trip() {
-        use futures::future::{BoxFuture, FutureExt};
-        use futures::stream::{FuturesUnordered as Set, StreamExt};
         use tokio::time::{sleep, Duration};
+        use futures::stream::{FuturesUnordered as Set, StreamExt};
+        use futures::future::{BoxFuture, FutureExt};
 
         let wire = TripWire::new();
         let mut futs: Set<BoxFuture<'static, bool>> = Set::new();

@@ -188,8 +188,7 @@ mod deadpool_postgres {
 mod sqlx {
     use sqlx::ConnectOptions;
     use super::{Duration, Error, Config, Figment};
-    use rocket::config::LogLevel;
-    
+
     type Options<D> = <<D as sqlx::Database>::Connection as sqlx::Connection>::Options;
 
     // Provide specialized configuration for particular databases.
@@ -211,15 +210,8 @@ mod sqlx {
         async fn init(figment: &Figment) -> Result<Self, Self::Error> {
             let config = figment.extract::<Config>()?;
             let mut opts = config.url.parse::<Options<D>>().map_err(Error::Init)?;
-            specialize(&mut opts, &config);
-
             opts.disable_statement_logging();
-            if let Ok(level) = figment.extract_inner::<LogLevel>(rocket::Config::LOG_LEVEL) {
-                if !matches!(level, LogLevel::Normal | LogLevel::Off) {
-                    opts.log_statements(level.into())
-                        .log_slow_statements(level.into(), Duration::default());
-                }
-            }
+            specialize(&mut opts, &config);
 
             sqlx::pool::PoolOptions::new()
                 .max_connections(config.max_connections as u32)

@@ -1,31 +1,28 @@
 use std::io;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures::future::{self, BoxFuture, Future, FutureExt, TryFutureExt};
-use futures::stream::StreamExt;
-use tokio::sync::oneshot;
-use tracing::instrument::{Instrument, Instrumented};
 use yansi::Paint;
+use tokio::sync::oneshot;
+use tracing::instrument::Instrument;
+use futures::stream::StreamExt;
+use futures::future::{self, FutureExt, Future, TryFutureExt, BoxFuture};
 
-use crate::error::{Error, ErrorKind};
-use crate::ext::{AsyncReadExt, CancellableIo, CancellableListener};
+use crate::{route, Rocket, Orbit, Request, Response, Data, Config};
 use crate::form::Form;
-use crate::http::private::{bind_tcp, Connection, Incoming, Listener};
-use crate::http::{hyper, uri::Origin, Header, Method, Status};
 use crate::outcome::Outcome;
+use crate::error::{Error, ErrorKind};
+use crate::ext::{AsyncReadExt, CancellableListener, CancellableIo};
 use crate::request::ConnectionMeta;
 use crate::tracingcontext::TracingContext;
-use crate::{route, Config, Data, Orbit, Request, Response, Rocket};
+use crate::http::{uri::Origin, hyper, Method, Status, Header};
+use crate::http::private::{bind_tcp, Listener, Connection, Incoming};
 
 // A token returned to force the execution of one method before another.
 pub(crate) struct RequestToken;
 
 async fn handle<Fut, T, F>(name: Option<&str>, run: F) -> Option<T>
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = T>,
+    where F: FnOnce() -> Fut, Fut: Future<Output = T>,
 {
     use std::panic::AssertUnwindSafe;
 
@@ -101,10 +98,14 @@ async fn hyper_service_fn(
                     // TODO: We don't have a request to pass in, so we just
                     // fabricate one. This is weird. We should let the user know
                     // that we failed to parse a request (by invoking some special
-                    // handler) instead of doing this.
+                    // handler) instead of doing this.		    
                     let dummy = Request::new(&rocket, Method::Get, Origin::ROOT);
                     let r = rocket.handle_error(Status::BadRequest, &dummy).await;
-                    return rocket.send_response(r, tx).await;
+		    let tc = TracingContext::new(&dummy);
+		    let span = warn_span!("req",ctx = %tc);		    
+                    return rocket.send_response(r, tx)
+			.instrument(span)
+			.await;
                 }
             };
         }
@@ -112,8 +113,7 @@ async fn hyper_service_fn(
     );
 
     // Receive the response written to `tx` by the task above.
-    rx.await
-        .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
+    rx.await.map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
 }
 
 impl Rocket<Orbit> {
@@ -125,11 +125,12 @@ impl Rocket<Orbit> {
         tx: oneshot::Sender<hyper::Response<hyper::Body>>,
     ) {
         let remote_hungup = |e: &io::Error| match e.kind() {
-            io::ErrorKind::BrokenPipe
+            | io::ErrorKind::BrokenPipe
             | io::ErrorKind::ConnectionReset
             | io::ErrorKind::ConnectionAborted => true,
             _ => false,
         };
+
         match self._send_response(response, tx).await {
             Ok(()) => info!("{}", Paint::green("Response succeeded.")),
             Err(error) if remote_hungup(&error) => error!("Remote left: {}.", error),
@@ -159,8 +160,7 @@ impl Rocket<Orbit> {
         }
 
         let (mut sender, hyp_body) = hyper::Body::channel();
-        let hyp_response = hyp_res
-            .body(hyp_body)
+        let hyp_response = hyp_res.body(hyp_body)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         tx.send(hyp_response).map_err(|_| {
@@ -171,9 +171,7 @@ impl Rocket<Orbit> {
         let max_chunk_size = body.max_chunk_size();
         let mut stream = body.into_bytes_stream(max_chunk_size);
         while let Some(next) = stream.next().await {
-            sender
-                .send_data(next?)
-                .await
+            sender.send_data(next?).await
                 .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))?;
         }
 
@@ -189,7 +187,7 @@ impl Rocket<Orbit> {
     pub(crate) async fn preprocess_request(
         &self,
         req: &mut Request<'_>,
-        data: &mut Data<'_>,
+        data: &mut Data<'_>
     ) -> RequestToken {
         // Check if this is a form and if the form contains the special _method
         // field which we use to reinterpret the request's method.
@@ -198,8 +196,7 @@ impl Rocket<Orbit> {
         let is_form = req.content_type().map_or(false, |ct| ct.is_form());
 
         if is_form && req.method() == Method::Post && peek_buffer.len() >= min_len {
-            let method = std::str::from_utf8(peek_buffer)
-                .ok()
+            let method = std::str::from_utf8(peek_buffer).ok()
                 .and_then(|raw_form| Form::values(raw_form).next())
                 .filter(|field| field.name == "_method")
                 .and_then(|field| field.value.parse().ok());
@@ -220,8 +217,10 @@ impl Rocket<Orbit> {
         &'s self,
         _token: RequestToken,
         request: &'r Request<'s>,
-        data: Data<'r>,
+        data: Data<'r>
     ) -> Response<'r> {
+        info!("{}:", request);
+
         // Remember if the request is `HEAD` for later body stripping.
         let was_head_request = request.method() == Method::Head;
 
@@ -250,7 +249,7 @@ impl Rocket<Orbit> {
     async fn route_and_process<'s, 'r: 's>(
         &'s self,
         request: &'r Request<'s>,
-        data: Data<'r>,
+        data: Data<'r>
     ) -> Response<'r> {
         let mut response = match self.route(request, data).await {
             Outcome::Success(response) => response,
@@ -297,8 +296,7 @@ impl Rocket<Orbit> {
             request.set_route(route);
 
             let name = route.name.as_deref();
-            let outcome = handle(name, || route.handler.handle(request, data))
-                .await
+            let outcome = handle(name, || route.handler.handle(request, data)).await
                 .unwrap_or(Outcome::Failure(Status::InternalServerError));
 
             // Check if the request processing completed (Some) or if the
@@ -328,7 +326,7 @@ impl Rocket<Orbit> {
     async fn invoke_catcher<'s, 'r: 's>(
         &'s self,
         status: Status,
-        req: &'r Request<'s>,
+        req: &'r Request<'s>
     ) -> Result<Response<'r>, Option<Status>> {
         // For now, we reset the delta state to prevent any modifications
         // from earlier, unsuccessful paths from being reflected in error
@@ -338,8 +336,7 @@ impl Rocket<Orbit> {
         if let Some(catcher) = self.router.catch(status, req) {
             warn!("Responding with registered {} catcher.", catcher);
             let name = catcher.name.as_deref();
-            handle(name, || catcher.handler.handle(status, req))
-                .await
+            handle(name, || catcher.handler.handle(status, req)).await
                 .map(|result| result.map_err(Some))
                 .unwrap_or_else(|| Err(None))
         } else {
@@ -353,47 +350,45 @@ impl Rocket<Orbit> {
     //
     // On catcher failure, the 500 error catcher is attempted. If _that_ fails,
     // the (infallible) default 500 error cather is used.
-    pub(crate) fn handle_error<'s, 'r: 's>(
+    pub(crate) async fn handle_error<'s, 'r: 's>(
         &'s self,
         mut status: Status,
-        req: &'r Request<'s>,
-    ) -> impl Future<Output = Response<'r>> + Send + 's {
-        async move {
+        req: &'r Request<'s> )
+	->  Response<'r>{
+//    ) -> impl Future<Output = Response<'r>> + Send + 's {
+//	async move {
             // Dispatch to the `status` catcher.
             if let Ok(r) = self.invoke_catcher(status, req).await {
-                return r;
+		return r;
             }
-
+	    
             // If it fails and it's not a 500, try the 500 catcher.
             if status != Status::InternalServerError {
-                error!("Catcher failed. Attemping 500 error catcher.");
-                status = Status::InternalServerError;
-                if let Ok(r) = self.invoke_catcher(status, req).await {
+		error!("Catcher failed. Attemping 500 error catcher.");
+		status = Status::InternalServerError;
+		if let Ok(r) = self.invoke_catcher(status, req).await {
                     return r;
-                }
+		}
             }
-
-            // If it failed again or if it was already a 500, use Rocket's default.
+	    // If it failed again or if it was already a 500, use Rocket's default.
             error!("{} catcher failed. Using Rocket default 500.", status.code);
             crate::catcher::default_handler(Status::InternalServerError, req)
-        }
-        .instrument(warn_span!(
-            "handle_error",
-            "Responding with {} catcher.",
-            Paint::red(&status)
-        ))
+        // }	
+        // .instrument(warn_span!(
+        //     "handle_error",
+        //     "Responding with {} catcher.",
+        //     Paint::red(&status)
+        // ))
     }
 
     pub(crate) async fn default_tcp_http_server<C>(mut self, ready: C) -> Result<(), Error>
-    where
-        C: for<'a> Fn(&'a Self) -> BoxFuture<'a, ()>,
+        where C: for<'a> Fn(&'a Self) -> BoxFuture<'a, ()>
     {
         use std::net::ToSocketAddrs;
 
         // Determine the address we're going to serve on.
         let addr = format!("{}:{}", self.config.address, self.config.port);
-        let mut addr = addr
-            .to_socket_addrs()
+        let mut addr = addr.to_socket_addrs()
             .map(|mut addrs| addrs.next().expect(">= 1 socket addr"))
             .map_err(|e| Error::new(ErrorKind::Io(e)))?;
 
@@ -403,9 +398,7 @@ impl Rocket<Orbit> {
                 use crate::http::tls::TlsListener;
 
                 let conf = config.to_native_config().map_err(ErrorKind::Io)?;
-                let l = TlsListener::bind(addr, conf)
-                    .await
-                    .map_err(ErrorKind::Bind)?;
+                let l = TlsListener::bind(addr, conf).await.map_err(ErrorKind::Bind)?;
                 addr = l.local_addr().unwrap_or(addr);
                 self.config.address = addr.ip();
                 self.config.port = addr.port();
@@ -424,18 +417,13 @@ impl Rocket<Orbit> {
 
     // TODO.async: Solidify the Listener APIs and make this function public
     pub(crate) async fn http_server<L>(self, listener: L) -> Result<(), Error>
-    where
-        L: Listener + Send,
-        <L as Listener>::Connection: Send + Unpin + 'static,
+        where L: Listener + Send, <L as Listener>::Connection: Send + Unpin + 'static
     {
         // Emit a warning if we're not running inside of Rocket's async runtime.
         if self.config.profile == Config::DEBUG_PROFILE {
             tokio::task::spawn_blocking(|| {
-                let this = std::thread::current();
-                if !this
-                    .name()
-                    .map_or(false, |s| s.starts_with("rocket-worker"))
-                {
+                let this  = std::thread::current();
+                if !this.name().map_or(false, |s| s.starts_with("rocket-worker")) {
                     warn!("Rocket is executing inside of a custom runtime.");
                     info!("Rocket's runtime is enabled via `#[rocket::main]` or `#[launch]`.");
                     info!("Forced shutdown is disabled. Runtime settings may be suboptimal.");
@@ -447,7 +435,7 @@ impl Rocket<Orbit> {
         let http1_keepalive = self.config.keep_alive != 0;
         let http2_keep_alive = match self.config.keep_alive {
             0 => None,
-            n => Some(Duration::from_secs(n as u64)),
+            n => Some(Duration::from_secs(n as u64))
         };
 
         // Set up cancellable I/O from the given listener. Shutdown occurs when
@@ -492,7 +480,7 @@ impl Rocket<Orbit> {
             }
         };
 
-        #[derive(Clone)]
+	#[derive(Clone)]
         struct InCurrentSpanExecutor;
 
         impl<Fut> hyper::rt::Executor<Fut> for InCurrentSpanExecutor
@@ -504,6 +492,8 @@ impl Rocket<Orbit> {
                 tokio::spawn(fut.in_current_span());
             }
         }
+
+        // NOTE: `hyper` uses `tokio::spawn()` as the default executor.
         let listener = CancellableListener::new(shutdown.clone(), listener, grace, mercy);
         let server = hyper::Server::builder(Incoming::new(listener))
             .executor(InCurrentSpanExecutor)
@@ -516,7 +506,6 @@ impl Rocket<Orbit> {
 
         // Wait for a shutdown notification or for the server to somehow fail.
         tokio::pin!(server);
-
         match future::select(shutdown, server).await {
             future::Either::Left((_, server)) => {
                 // If a task has some runaway I/O, like an infinite loop, the
@@ -531,10 +520,7 @@ impl Rocket<Orbit> {
                         std::thread::spawn(move || {
                             std::thread::sleep(Duration::from_secs(grace + mercy));
                             std::thread::sleep(Duration::from_millis(500));
-                            if this
-                                .name()
-                                .map_or(false, |s| s.starts_with("rocket-worker"))
-                            {
+                            if this.name().map_or(false, |s| s.starts_with("rocket-worker")) {
                                 error!("Server failed to shutdown cooperatively. Terminating.");
                                 std::process::exit(1);
                             } else {
@@ -552,25 +538,5 @@ impl Rocket<Orbit> {
             }
             future::Either::Right((result, _)) => result,
         }
-    }
-}
-
-struct InstrumentedService<S> {
-    span: tracing::Span,
-    service: S,
-}
-
-impl<S: hyper::service::Service<R>, R> hyper::service::Service<R> for InstrumentedService<S> {
-    type Response = S::Response;
-    type Future = Instrumented<S::Future>;
-    type Error = S::Error;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let _e = self.span.enter();
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: R) -> Self::Future {
-        self.service.call(request).instrument(self.span.clone())
     }
 }

@@ -1,7 +1,7 @@
 use std::fmt;
 
-use crate::request::{FromRequest, Outcome, Request};
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
+use crate::request::{Request, FromRequest, Outcome};
 
 use crate::data::ByteUnit;
 use crate::http::uncased::Uncased;
@@ -203,7 +203,7 @@ impl Limits {
         let name = name.into();
         match self.limits.binary_search_by(|(k, _)| k.cmp(&name)) {
             Ok(i) => self.limits[i].1 = limit,
-            Err(i) => self.limits.insert(i, (name, limit)),
+            Err(i) => self.limits.insert(i, (name, limit))
         }
 
         self

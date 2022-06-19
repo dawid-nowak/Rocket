@@ -66,9 +66,9 @@ pub fn _catch(
             fn into_info(self) -> #_catcher::StaticInfo {
                 fn monomorphized_function<'__r>(
                     #__status: #Status,
-                    #__req: &'_b #Request<'_>
-                ) -> #_catcher::BoxFuture<'_b> {
-                    use #_trace::Instrument as _;
+                    #__req: &'__r #Request<'_>
+                ) -> #_catcher::BoxFuture<'__r> {
+		    use #_trace::Instrument as _;
                     #_Box::pin(async move {
                         let __response = #catcher_response;
                         #Response::build()

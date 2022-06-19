@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::{fmt, path};
 use std::borrow::Cow;
-
 use time::{macros::format_description, format_description::FormatItem};
 
 use crate::RawStr;
@@ -354,6 +353,7 @@ impl_with_display! {
     NonZeroUsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128,
 }
 
+
 macro_rules! impl_with_string {
     ($($T:ty => $f:expr),+ $(,)?) => {$(
         /// This implementation is identical to a percent-encoded version of the
@@ -370,13 +370,12 @@ macro_rules! impl_with_string {
 
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 
-// Keep formats in sync with 'FromFormField' impls.
 static DATE_FMT: &[FormatItem<'_>] = format_description!("[year padding:none]-[month]-[day]");
 static TIME_FMT: &[FormatItem<'_>] = format_description!("[hour padding:none]:[minute]:[second]");
 static DATE_TIME_FMT: &[FormatItem<'_>] =
     format_description!("[year padding:none]-[month]-[day]T[hour padding:none]:[minute]:[second]");
 
-// Keep list in sync with the 'FromUriParam' impls.
+// Keep in-sync with the 'FromUriParam' impls.`
 impl_with_string! {
     time::Date => |d| d.format(&DATE_FMT).map_err(|_| fmt::Error),
     time::Time => |d| d.format(&TIME_FMT).map_err(|_| fmt::Error),
